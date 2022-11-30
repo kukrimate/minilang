@@ -16,8 +16,11 @@ PriExpr: Expr = {
 
 UnExpr: Expr = {
   PriExpr,
-  "-" <arg:PriExpr> => {
+  "-" <arg:UnExpr> => {
     Expr::Un(UnOp::Neg, Box::new(arg))
+  },
+  "!" <arg:UnExpr> => {
+    Expr::Un(UnOp::Not, Box::new(arg))
   }
 }
 
@@ -76,14 +79,14 @@ EqExpr: Expr = {
 AndExpr: Expr = {
   EqExpr,
   <lhs:AndExpr> "&&" <rhs:EqExpr> => {
-    Expr::Bin(BinOp::And, Box::new(lhs), Box::new(rhs))
+    Expr::And(Box::new(lhs), Box::new(rhs))
   }
 }
 
 OrExpr: Expr = {
   AndExpr,
   <lhs:OrExpr> "||" <rhs:AndExpr> => {
-    Expr::Bin(BinOp::Or, Box::new(lhs), Box::new(rhs))
+    Expr::Or(Box::new(lhs), Box::new(rhs))
   }
 }
 

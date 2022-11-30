@@ -1,12 +1,12 @@
 use num_bigint::BigInt;
 
-#[derive(Debug)]
-pub enum UnOp { Neg }
+#[derive(Clone,Debug)]
+pub enum UnOp { Neg, Not }
 
-#[derive(Debug)]
-pub enum BinOp { Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or }
+#[derive(Clone,Debug)]
+pub enum BinOp { Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Gt, Le, Ge }
 
-#[derive(Debug)]
+#[derive(Clone,Debug)]
 pub enum Expr {
   Nil,
   Bool(bool),
@@ -16,6 +16,8 @@ pub enum Expr {
   Call(Box<Expr>, Vec<Expr>),
   Un(UnOp, Box<Expr>),
   Bin(BinOp, Box<Expr>, Box<Expr>),
+  And(Box<Expr>, Box<Expr>),
+  Or(Box<Expr>, Box<Expr>),
   Block(Vec<Expr>),
   Var(String, Box<Expr>),
   As(String, Box<Expr>),
@@ -27,5 +29,5 @@ pub enum Expr {
   Func(String, Vec<String>, Box<Expr>)
 }
 
-#[derive(Debug)]
+#[derive(Clone,Debug)]
 pub struct Program(pub Vec<Expr>);

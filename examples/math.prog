@@ -6,9 +6,4 @@ func add(x, y) {
 var a = 10;
 var b = 10;
 var tmp = add(a, b);
-
-if a < 5 {
-  print(a)
-}
-
 print(tmp)

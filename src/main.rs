@@ -1,4 +1,5 @@
 mod ast;
+mod interp;
 
 use pico_args;
 use lalrpop_util::lalrpop_mod;
@@ -60,9 +61,13 @@ fn parse_args() -> Result<Args, ArgsError> {
 }
 
 fn main() {
+  // Parse arguments
   let args = parse_args().unwrap();
-  let parser = parse::ProgramParser::new();
-
+  // Read program from disk
   let input = std::fs::read_to_string(args.input).unwrap();
-  println!("{:#?}", parser.parse(&input).unwrap());
+  // Parse program
+  let parser = parse::ProgramParser::new();
+  let program = parser.parse(&input).unwrap();
+  // Execute program
+  interp::execute(&program).unwrap();
 }
