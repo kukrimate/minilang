@@ -148,6 +148,9 @@ ExprWithBlock: Expr = {
   "while" <cond:Expr> <body:Block> => {
     Expr::While(Box::new(cond), Box::new(body))
   },
+  "for" <id:Id> "in" <iter:Expr> <body:Block> => {
+    Expr::For(id, Box::new(iter), Box::new(body))
+  },
   FuncDef => {
     Expr::Func(<>)
   },

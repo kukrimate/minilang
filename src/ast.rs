@@ -27,6 +27,7 @@ pub enum Expr {
   Return(Box<Expr>),
   If(Box<Expr>, Box<Expr>, Box<Expr>),
   While(Box<Expr>, Box<Expr>),
+  For(String, Box<Expr>, Box<Expr>),
   Func(FuncDef),
   Type(String, Vec<String>, Vec<FuncDef>)
 }

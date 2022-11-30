@@ -7,7 +7,7 @@ file_extensions:
 scope: source.mini
 
 variables:
-  keywords: 'var|continue|break|return|if|else|while|nil|true|false|func|type|self'
+  keywords: 'var|continue|break|return|if|else|while|for|in|nil|true|false|func|type|self'
 
 contexts:
   main:

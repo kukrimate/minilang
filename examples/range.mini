@@ -1,0 +1,15 @@
+type range(cur, max) {
+  func next() {
+    if cur < max {
+      var tmp = cur;
+      cur = cur + 1;
+      tmp
+    } else {
+      nil
+    }
+  }
+}
+
+for i in range(0, 100) {
+  print(i);
+}

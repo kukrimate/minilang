@@ -329,6 +329,22 @@ fn eval<'a>(env: Env, expr: &'a ast::Expr) -> VRes {
       }
       Ok(VNil::new())
     }
+    ast::Expr::For(id, iter, body) => {
+      let v_iter = eval(env.clone(), iter)?;
+      loop {
+        let val = v_iter.eval_dot("next")?.eval_call(vec![])?;
+        if let Some(..) = val.downcast_nil() {
+          break
+        }
+        // Create environment
+        let env = EnvS::child(env.clone());
+        // Bind iterator
+        env.borrow_mut().insert(id, val)?;
+        // Evaluate body
+        eval(env.clone(), body)?;
+      }
+      Ok(VNil::new())
+    }
     ast::Expr::Func((id, params, body)) => {
       let v_func = Func::new(env.clone(), params, &**body);
       env.borrow_mut().insert(id, v_func)?;
