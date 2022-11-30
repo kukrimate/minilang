@@ -1,12 +1,13 @@
-mod ast;
-mod interp;
-
-use pico_args;
 use lalrpop_util::lalrpop_mod;
+use pico_args;
 use std::fmt;
 use std::path::PathBuf;
 
-lalrpop_mod!(parse);
+mod ast;              // AST definition
+mod interp;           // AST interpreter
+lalrpop_mod!(parse);  // Parser
+mod val;              // Value types
+mod util;             // Utilities
 
 const HELP: &str = "\
 Interpreter
@@ -15,10 +16,6 @@ USAGE:
 FLAGS:
   -h, --help            Prints help information
 OPTIONS:
-  --number NUMBER       Sets a number
-  --opt-number NUMBER   Sets an optional number
-  --width WIDTH         Sets width [default: 10]
-  --output PATH         Sets an output path
 ARGS:
   <INPUT>               Input file
 ";

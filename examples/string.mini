@@ -1,0 +1,6 @@
+var a = "foo";
+var b = "bar";
+
+print(a);
+print(b);
+print(a + "\t" + b)

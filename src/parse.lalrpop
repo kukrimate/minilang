@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::util::*;
 use num_bigint::BigInt;
 use std::str::FromStr;
 
@@ -150,7 +151,7 @@ pub Program: Program = ExprSeq => Program(<>);
 // Tokens
 
 Int: BigInt = r"[0-9]+" => BigInt::from_str(<>).unwrap();
-Str: String = r#""([^"]|\\")*""# => str::to_owned(<>);
+Str: String = r#""([^"]|\\")*""# => parse_str_lit(<>).unwrap();
 Id: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => str::to_owned(<>);
 
 match {
