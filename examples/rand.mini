@@ -1,0 +1,15 @@
+func makerand(seed) {
+  func rand() {
+    seed = (1103515245 * seed + 12345) % 4294967296;
+    seed
+  }
+  rand
+}
+
+var rand = makerand(time());
+
+var i = 0;
+while i < 100000 {
+  print(rand());
+  i = i + 1;
+}

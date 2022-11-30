@@ -35,6 +35,7 @@ pub trait VTrait {
 #[derive(Debug)]
 pub enum VErr {
   UnknownId(String),
+  RedefinedId(String),
   WrongType,
   DivideByZero,
   WrongArgs
