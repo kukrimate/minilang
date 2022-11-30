@@ -94,15 +94,22 @@ OrExpr: Expr = {
   }
 }
 
-ExprWithoutBlock: Expr = {
+LambdaExpr: Expr = {
   OrExpr,
+  "lambda" <params:Comma<Id>> ":" <body:LambdaExpr> => {
+    Expr::Lambda(params, Box::new(body))
+  }
+}
+
+ExprWithoutBlock: Expr = {
+  LambdaExpr,
   "var" <id:Id> => {
     Expr::Var(id, Box::new(Expr::Nil))
   },
-  "var" <id:Id> "=" <val:OrExpr> => {
+  "var" <id:Id> "=" <val:LambdaExpr> => {
     Expr::Var(id, Box::new(val))
   },
-  <id:Id> "=" <val:OrExpr> => {
+  <id:Id> "=" <val:LambdaExpr> => {
     Expr::As(id, Box::new(val))
   },
   "continue" => {
@@ -111,7 +118,7 @@ ExprWithoutBlock: Expr = {
   "break" => {
     Expr::Break
   },
-  "return" <val:OrExpr?> => {
+  "return" <val:LambdaExpr?> => {
     Expr::Return(Box::new(val.unwrap_or(Expr::Nil)))
   }
 }

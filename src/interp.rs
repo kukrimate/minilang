@@ -375,5 +375,8 @@ fn eval<'a>(env: Env, expr: &'a ast::Expr) -> VRes {
       env.borrow_mut().insert(id, v_type)?;
       Ok(VNil::new())
     }
+    ast::Expr::Lambda(params, body) => {
+      Ok(Func::new(env.clone(), params, &**body))
+    }
   }
 }

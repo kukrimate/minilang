@@ -29,7 +29,8 @@ pub enum Expr {
   While(Box<Expr>, Box<Expr>),
   For(String, Box<Expr>, Box<Expr>),
   Func(FuncDef),
-  Type(String, Vec<String>, Vec<FuncDef>)
+  Type(String, Vec<String>, Vec<FuncDef>),
+  Lambda(Vec<String>, Box<Expr>)
 }
 
 pub type FuncDef = (String, Vec<String>, Box<Expr>);

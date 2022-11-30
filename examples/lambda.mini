@@ -1,0 +1,7 @@
+var add = lambda a, b: a + b;
+print(add(5, 6));
+print(add(25, 5));
+
+var add_curry = lambda a: lambda b: a + b;
+print(add_curry(5)(6));
+print(add_curry(10)(10));
