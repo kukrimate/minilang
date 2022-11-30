@@ -131,6 +131,18 @@ ExprSeq: Vec<Expr> = {
 
 Block: Expr = "{" <exprs:ExprSeq> "}" => Expr::Block(exprs);
 
+IfExpr: Expr = {
+  "if" <cond:Expr> <body1:Block> => {
+    Expr::If(Box::new(cond), Box::new(body1), Box::new(Expr::Nil))
+  },
+  "if" <cond:Expr> <body1:Block> "else" <body2:Block> => {
+    Expr::If(Box::new(cond), Box::new(body1), Box::new(body2))
+  },
+  "if" <cond:Expr> <body1:Block> "else" <body2:IfExpr> => {
+    Expr::If(Box::new(cond), Box::new(body1), Box::new(body2))
+  }
+}
+
 FuncDef: FuncDef = {
   "func" <id:Id> "(" <params:Comma<Id>> ")" <body:Block> => {
     (id, params, Box::new(body))
@@ -139,12 +151,7 @@ FuncDef: FuncDef = {
 
 ExprWithBlock: Expr = {
   Block,
-  "if" <cond:Expr> <body1:Block> => {
-    Expr::If(Box::new(cond), Box::new(body1), Box::new(Expr::Nil))
-  },
-  "if" <cond:Expr> <body1:Block> "else" <body2:Block> => {
-    Expr::If(Box::new(cond), Box::new(body1), Box::new(body2))
-  },
+  IfExpr,
   "while" <cond:Expr> <body:Block> => {
     Expr::While(Box::new(cond), Box::new(body))
   },
