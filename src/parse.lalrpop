@@ -1,0 +1,163 @@
+use crate::ast::*;
+use num_bigint::BigInt;
+use std::str::FromStr;
+
+grammar();
+
+PriExpr: Expr = {
+  "nil" => Expr::Nil,
+  "true" => Expr::Bool(true),
+  "false" => Expr::Bool(false),
+  Int => Expr::Int(<>),
+  Str => Expr::Str(<>),
+  Id => Expr::Id(<>),
+  "(" <expr:Expr> ")" => expr
+}
+
+UnExpr: Expr = {
+  PriExpr,
+  "-" <arg:PriExpr> => {
+    Expr::Un(UnOp::Neg, Box::new(arg))
+  }
+}
+
+PostExpr: Expr = {
+  UnExpr,
+  <func:PostExpr> "(" <args:Comma<Expr>> ")" => {
+    Expr::Call(Box::new(func), args)
+  }
+}
+
+MulExpr: Expr = {
+  PostExpr,
+  <lhs:MulExpr> "*" <rhs:PostExpr> => {
+    Expr::Bin(BinOp::Mul, Box::new(lhs), Box::new(rhs))
+  },
+  <lhs:MulExpr> "/" <rhs:PostExpr> => {
+    Expr::Bin(BinOp::Div, Box::new(lhs), Box::new(rhs))
+  },
+  <lhs:MulExpr> "%" <rhs:PostExpr> => {
+    Expr::Bin(BinOp::Mod, Box::new(lhs), Box::new(rhs))
+  }
+}
+
+AddExpr: Expr = {
+  MulExpr,
+  <lhs:AddExpr> "+" <rhs:MulExpr> => {
+    Expr::Bin(BinOp::Add, Box::new(lhs), Box::new(rhs))
+  },
+  <lhs:AddExpr> "-" <rhs:MulExpr> => {
+    Expr::Bin(BinOp::Sub, Box::new(lhs), Box::new(rhs))
+  }
+}
+
+EqExpr: Expr = {
+  AddExpr,
+  <lhs:AddExpr> "==" <rhs:AddExpr> => {
+    Expr::Bin(BinOp::Eq, Box::new(lhs), Box::new(rhs))
+  },
+  <lhs:AddExpr> "!=" <rhs:AddExpr> => {
+    Expr::Bin(BinOp::Ne, Box::new(lhs), Box::new(rhs))
+  },
+  <lhs:AddExpr> "<" <rhs:AddExpr> => {
+    Expr::Bin(BinOp::Lt, Box::new(lhs), Box::new(rhs))
+  },
+  <lhs:AddExpr> ">" <rhs:AddExpr> => {
+    Expr::Bin(BinOp::Gt, Box::new(lhs), Box::new(rhs))
+  },
+  <lhs:AddExpr> "<=" <rhs:AddExpr> => {
+    Expr::Bin(BinOp::Le, Box::new(lhs), Box::new(rhs))
+  },
+  <lhs:AddExpr> ">=" <rhs:AddExpr> => {
+    Expr::Bin(BinOp::Ge, Box::new(lhs), Box::new(rhs))
+  }
+}
+
+AndExpr: Expr = {
+  EqExpr,
+  <lhs:AndExpr> "&&" <rhs:EqExpr> => {
+    Expr::Bin(BinOp::And, Box::new(lhs), Box::new(rhs))
+  }
+}
+
+OrExpr: Expr = {
+  AndExpr,
+  <lhs:OrExpr> "||" <rhs:AndExpr> => {
+    Expr::Bin(BinOp::Or, Box::new(lhs), Box::new(rhs))
+  }
+}
+
+ExprWithoutBlock: Expr = {
+  OrExpr,
+  "var" <id:Id> "=" <val:OrExpr> => {
+    Expr::Var(id, Box::new(val))
+  },
+  <id:Id> "=" <val:OrExpr> => {
+    Expr::As(id, Box::new(val))
+  },
+  "continue" => {
+    Expr::Continue
+  },
+  "break" => {
+    Expr::Break
+  },
+  "return" <val:OrExpr?> => {
+    Expr::Return(Box::new(val.unwrap_or(Expr::Nil)))
+  }
+}
+
+ExprSeqItem: Expr = {
+  ExprWithBlock,
+  <expr:ExprWithoutBlock> ";" => expr
+}
+
+ExprSeq: Vec<Expr> = {
+  ExprSeqItem*,
+  <mut body:ExprSeqItem*> <last:ExprWithoutBlock> => {
+    body.push(last);
+    body
+  }
+}
+
+Block: Expr = "{" <exprs:ExprSeq> "}" => Expr::Block(exprs);
+
+ExprWithBlock: Expr = {
+  Block,
+  "if" <cond:Expr> <body1:Block> => {
+    Expr::If(Box::new(cond), Box::new(body1), Box::new(Expr::Nil))
+  },
+  "if" <cond:Expr> <body1:Block> "else" <body2:Block> => {
+    Expr::If(Box::new(cond), Box::new(body1), Box::new(body2))
+  },
+  "while" <cond:Expr> <body:Block> => {
+    Expr::While(Box::new(cond), Box::new(body))
+  },
+  "func" <id:Id> "(" <params:Comma<Id>> ")" <body:Block> => {
+    Expr::Func(id, params, Box::new(body))
+  },
+}
+
+Expr: Expr = {
+  ExprWithoutBlock,
+  ExprWithBlock
+}
+
+pub Program: Program = ExprSeq => Program(<>);
+
+// Tokens
+
+Int: BigInt = r"[0-9]+" => BigInt::from_str(<>).unwrap();
+Str: String = r#""([^"]|\\")*""# => str::to_owned(<>);
+Id: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => str::to_owned(<>);
+
+// Macros
+
+Comma<T>: Vec<T> = {
+  <mut v:(<T> ",")*> <e:T?> => match e {
+    None => v,
+    Some(e) => {
+      v.push(e);
+      v
+    }
+  }
+}

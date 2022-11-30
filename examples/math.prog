@@ -1,0 +1,14 @@
+func add(x, y) {
+  var sum = x + y;
+  sum
+}
+
+var a = 10;
+var b = 10;
+var tmp = add(a, b);
+
+if a < 5 {
+  print(a)
+}
+
+print(tmp)
