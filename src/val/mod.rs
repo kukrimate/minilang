@@ -1,5 +1,6 @@
 use crate::ast;
 use num_bigint::BigInt;
+use std::fmt;
 use std::rc::Rc;
 
 /// Runtime result
@@ -58,14 +59,32 @@ pub trait VTrait {
 
 /// Runtime error
 
-#[derive(Debug)]
 pub enum VErr {
   UnknownId(String),
   RedefinedId(String),
   WrongType,
   DivideByZero,
   WrongArgs,
-  WrongField
+  WrongField(String),
+  WrongContinue,
+  WrongBreak,
+  WrongReturn(VRef)
+}
+
+impl fmt::Debug for VErr {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      VErr::UnknownId(id) => write!(f, "Unknown identifier {}", id),
+      VErr::RedefinedId(id) => write!(f, "Re-definition of {}", id),
+      VErr::WrongType => write!(f, "Type error"),
+      VErr::DivideByZero => write!(f, "Division by zero"),
+      VErr::WrongArgs => write!(f, "Division by zero"),
+      VErr::WrongField(id) => write!(f, "Unknown field {}", id),
+      VErr::WrongContinue => write!(f, "Continue outside loop"),
+      VErr::WrongBreak => write!(f, "Break outside loop"),
+      VErr::WrongReturn(..) => write!(f, "Return outside function")
+    }
+  }
 }
 
 mod v_bool;

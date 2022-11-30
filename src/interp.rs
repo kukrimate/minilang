@@ -32,7 +32,10 @@ impl VTrait for Func {
       env.borrow_mut().insert(param, arg)?;
     }
     // Evaluate body with arguments
-    eval(env.clone(), unsafe{&*self.body})
+    match eval(env.clone(), unsafe{&*self.body}) {
+      Err(VErr::WrongReturn(val)) => Ok(val),
+      result => result,
+    }
   }
 
   fn to_str(&self) -> Result<Rc<VStr>, VErr> {
@@ -99,7 +102,7 @@ impl VTrait for TypeObj {
     if let Some(val) = self.env.borrow().names.get(field) {
       Ok(val.clone())
     } else {
-      Err(VErr::WrongField)
+      Err(VErr::WrongField(str::to_owned(field)))
     }
   }
 
@@ -304,13 +307,14 @@ fn eval<'a>(env: Env, expr: &'a ast::Expr) -> VRes {
       Ok(VNil::new())
     }
     ast::Expr::Continue => {
-      todo!()
+      Err(VErr::WrongContinue)
     }
     ast::Expr::Break => {
-      todo!()
+      Err(VErr::WrongBreak)
     }
-    ast::Expr::Return(..) => {
-      todo!()
+    ast::Expr::Return(val) => {
+      let v_val = eval(env.clone(), val)?;
+      Err(VErr::WrongReturn(v_val))
     }
     ast::Expr::If(cond, arg1, arg2) => {
       match eval(env.clone(), cond)?.downcast_bool() {
@@ -321,27 +325,43 @@ fn eval<'a>(env: Env, expr: &'a ast::Expr) -> VRes {
     }
     ast::Expr::While(cond, body) => {
       loop {
+        // Break if the condition is false
         match eval(env.clone(), cond)?.downcast_bool() {
-          Some(b) if b.v() => eval(env.clone(), body)?,
+          Some(b) if b.v() => (),
           Some(..) => break,
           _ => return Err(VErr::WrongType)
         };
+
+        // Evaluate body
+        match eval(env.clone(), body) {
+          Err(VErr::WrongContinue) => (),
+          Err(VErr::WrongBreak) => break,
+          e @ Err(..) => return e,
+          _ => (),
+        }
       }
       Ok(VNil::new())
     }
     ast::Expr::For(id, iter, body) => {
       let v_iter = eval(env.clone(), iter)?;
       loop {
-        let val = v_iter.eval_dot("next")?.eval_call(vec![])?;
+        // Read next element from iterator
+        let val = v_iter.eval_dot("next")?
+                        .eval_call(vec![])?;
         if let Some(..) = val.downcast_nil() {
           break
         }
         // Create environment
         let env = EnvS::child(env.clone());
-        // Bind iterator
+        // Bind element
         env.borrow_mut().insert(id, val)?;
         // Evaluate body
-        eval(env.clone(), body)?;
+        match eval(env.clone(), body) {
+          Err(VErr::WrongContinue) => (),
+          Err(VErr::WrongBreak) => break,
+          e @ Err(..) => return e,
+          _ => (),
+        }
       }
       Ok(VNil::new())
     }
