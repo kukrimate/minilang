@@ -9,6 +9,7 @@ impl VInt {
     Rc::new(VInt(i))
   }
 
+  #[allow(dead_code)]
   pub fn v(&self) -> &BigInt { &self.0 }
 }
 

@@ -1,0 +1,22 @@
+type Couple (person1, person2) {
+  func avg_age() {
+    (person1.age + person2.age) / 2
+  }
+}
+
+type Person (name, age) {
+  func display() {
+    print(name);
+    print(age)
+  }
+
+  func add(other) {
+    Couple(self, other)
+  }
+}
+
+var p1 = Person ("John", 35);
+var p2 = Person ("Janet", 25);
+var couple = p1 + p2;
+
+print(couple.avg_age());

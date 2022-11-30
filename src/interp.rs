@@ -34,6 +34,78 @@ impl VTrait for Func {
     // Evaluate body with arguments
     eval(env.clone(), unsafe{&*self.body})
   }
+
+  fn to_str(&self) -> Result<Rc<VStr>, VErr> {
+    Ok(VStr::new(format!("func {:p}", self as *const _)))
+  }
+}
+
+/// Type constructor
+
+struct TypeCtor {
+  env: Env,
+  fields: *const Vec<String>,
+  methods: *const Vec<ast::FuncDef>
+}
+
+impl TypeCtor {
+  fn new(env: Env, fields: &Vec<String>, methods: &Vec<ast::FuncDef>) -> Rc<TypeCtor> {
+    Rc::new(TypeCtor { env, fields, methods })
+  }
+}
+
+impl VTrait for TypeCtor {
+  fn eval_call(&self, args: Vec<VRef>) -> VRes {
+    // Make sure there is a value for each field
+    if args.len() != unsafe{(*self.fields).len()} {
+      return Err(VErr::WrongArgs)
+    }
+    // Create fields
+    let env = EnvS::child(self.env.clone());
+    for (id, val) in unsafe{(*self.fields).iter()}.zip(args.into_iter()) {
+      env.borrow_mut().insert(id, val)?;
+    }
+    for (id, params, body) in unsafe{(*self.methods).iter()} {
+      let v_method = Func::new(env.clone(), params, body);
+      env.borrow_mut().insert(id, v_method)?;
+    }
+    // Construct type object
+    let obj = TypeObj::new(env.clone());
+    // Add "self" binding
+    env.borrow_mut().insert("self", obj.clone())?;
+    // Yield object
+    Ok(obj)
+  }
+
+  fn to_str(&self) -> Result<Rc<VStr>, VErr> {
+    Ok(VStr::new(format!("ctor {:p}", self as *const _)))
+  }
+}
+
+/// Type object
+
+pub struct TypeObj {
+  env: Env
+}
+
+impl TypeObj {
+  fn new(env: Env) -> Rc<TypeObj> {
+    Rc::new(TypeObj { env })
+  }
+}
+
+impl VTrait for TypeObj {
+  fn eval_dot(&self, field: &str) -> VRes {
+    if let Some(val) = self.env.borrow().names.get(field) {
+      Ok(val.clone())
+    } else {
+      Err(VErr::WrongField)
+    }
+  }
+
+  fn to_str(&self) -> Result<Rc<VStr>, VErr> {
+    Ok(VStr::new(format!("obj {:p}", self as *const _)))
+  }
 }
 
 /// Builtin function
@@ -153,7 +225,7 @@ fn eval<'a>(env: Env, expr: &'a ast::Expr) -> VRes {
     ast::Expr::Id(id) => env.borrow().get(id),
     ast::Expr::Call(func, args) => {
       // Evaluate function
-      let func = eval(env.clone(), func)?;
+      let v_func = eval(env.clone(), func)?;
 
       // Evaluate arguments
       let mut v_args = Vec::new();
@@ -162,7 +234,11 @@ fn eval<'a>(env: Env, expr: &'a ast::Expr) -> VRes {
       }
 
       // Evaluate call
-      func.eval_call(v_args)
+      v_func.eval_call(v_args)
+    }
+    ast::Expr::Dot(obj, field) => {
+      let v_obj = eval(env.clone(), obj)?;
+      v_obj.eval_dot(field)
     }
     ast::Expr::Un(op, arg) => {
       let v_arg = eval(env.clone(), arg)?;
@@ -253,9 +329,14 @@ fn eval<'a>(env: Env, expr: &'a ast::Expr) -> VRes {
       }
       Ok(VNil::new())
     }
-    ast::Expr::Func(id, params, body) => {
+    ast::Expr::Func((id, params, body)) => {
       let v_func = Func::new(env.clone(), params, &**body);
       env.borrow_mut().insert(id, v_func)?;
+      Ok(VNil::new())
+    }
+    ast::Expr::Type(id, fields, methods) => {
+      let v_type = TypeCtor::new(env.clone(), fields, methods);
+      env.borrow_mut().insert(id, v_type)?;
       Ok(VNil::new())
     }
   }

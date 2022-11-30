@@ -29,6 +29,9 @@ PostExpr: Expr = {
   UnExpr,
   <func:PostExpr> "(" <args:Comma<Expr>> ")" => {
     Expr::Call(Box::new(func), args)
+  },
+  <obj:PostExpr> "." <id:Id> => {
+    Expr::Dot(Box::new(obj), id)
   }
 }
 
@@ -93,6 +96,9 @@ OrExpr: Expr = {
 
 ExprWithoutBlock: Expr = {
   OrExpr,
+  "var" <id:Id> => {
+    Expr::Var(id, Box::new(Expr::Nil))
+  },
   "var" <id:Id> "=" <val:OrExpr> => {
     Expr::Var(id, Box::new(val))
   },
@@ -125,6 +131,12 @@ ExprSeq: Vec<Expr> = {
 
 Block: Expr = "{" <exprs:ExprSeq> "}" => Expr::Block(exprs);
 
+FuncDef: FuncDef = {
+  "func" <id:Id> "(" <params:Comma<Id>> ")" <body:Block> => {
+    (id, params, Box::new(body))
+  }
+}
+
 ExprWithBlock: Expr = {
   Block,
   "if" <cond:Expr> <body1:Block> => {
@@ -136,9 +148,12 @@ ExprWithBlock: Expr = {
   "while" <cond:Expr> <body:Block> => {
     Expr::While(Box::new(cond), Box::new(body))
   },
-  "func" <id:Id> "(" <params:Comma<Id>> ")" <body:Block> => {
-    Expr::Func(id, params, Box::new(body))
+  FuncDef => {
+    Expr::Func(<>)
   },
+  "type" <id:Id> "(" <fields:Comma<Id>> ")" "{" <methods:FuncDef*> "}" => {
+    Expr::Type(id, fields, methods)
+  }
 }
 
 Expr: Expr = {
