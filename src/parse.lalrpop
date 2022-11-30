@@ -153,6 +153,17 @@ Int: BigInt = r"[0-9]+" => BigInt::from_str(<>).unwrap();
 Str: String = r#""([^"]|\\")*""# => str::to_owned(<>);
 Id: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => str::to_owned(<>);
 
+match {
+  // Skip whitespace
+  r"\s*" => {},
+  // Skip `// comments`
+  r"//[^\n\r]*[\n\r]*" => {},
+  // Skip `/* comments */`
+  r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/" => {},
+  // Other regexes
+  _
+}
+
 // Macros
 
 Comma<T>: Vec<T> = {

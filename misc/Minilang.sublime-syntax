@@ -1,0 +1,52 @@
+%YAML 1.2
+---
+
+file_extensions:
+  - mini
+
+scope: source.mini
+
+variables:
+  keywords: 'var|continue|break|return|if|else|while|true|false|func'
+
+contexts:
+  main:
+    # Comments
+    - match: '//'
+      scope: punctuation.definition.comment.mini
+      push: line_comment
+
+    - match: '/\*'
+      scope: punctuation.definition.comment.mini
+      push: block_comment
+
+    # Keywords
+    - match: '\b({{keywords}})\b'
+      scope: keyword.control.mini
+
+    # Numeric literals
+    - match: '\b[0-9]+\b'
+      scope: constant.numeric.mini
+
+    # String literals
+    - match: '"'
+      scope: punctuation.definition.string.begin.mini
+      push: double_quoted_string
+
+  double_quoted_string:
+    - meta_scope: string.quoted.double.mini
+    - match: '\\.'
+      scope: constant.character.escape.mini
+    - match: '"'
+      scope: punctuation.definition.string.end.mini
+      pop: true
+
+  line_comment:
+    - meta_scope: comment.line.mini
+    - match: $
+      pop: true
+
+  block_comment:
+    - meta_scope: comment.block.mini
+    - match: '\*/'
+      pop: true
