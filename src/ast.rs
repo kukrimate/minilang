@@ -21,7 +21,7 @@ pub enum Expr {
   Or(Box<Expr>, Box<Expr>),
   Block(Vec<Expr>),
   Var(String, Box<Expr>),
-  As(String, Box<Expr>),
+  As(Box<Expr>, Box<Expr>),
   Continue,
   Break,
   Return(Box<Expr>),

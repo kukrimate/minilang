@@ -20,3 +20,7 @@ var p2 = Person ("Janet", 25);
 var couple = p1 + p2;
 
 print(couple.avg_age());
+
+var p3 = Person ("James", 35);
+p3.name = "Jonas";
+print(p3.name);

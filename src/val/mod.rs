@@ -16,8 +16,11 @@ pub trait VTrait: GcObj {
   // Call as a function
   fn eval_call(&self, _: &mut Interpreter, _: Vec<VRef>) -> VRes { Err(VErr::WrongType) }
 
-  // Access field
-  fn eval_dot(&self, _: &mut Interpreter, _: &str) -> VRes { Err(VErr::WrongType) }
+  // Read field
+  fn eval_get(&self, _: &mut Interpreter, _: &str) -> VRes { Err(VErr::WrongType) }
+
+  // Write field
+  fn eval_set(&mut self, _: &mut Interpreter, _: &str, _: VRef) -> VRes { Err(VErr::WrongType) }
 
   // Apply a unary operator to it
   fn eval_un(&self, interp: &mut Interpreter, op: &ast::UnOp) -> VRes {
@@ -25,7 +28,7 @@ pub trait VTrait: GcObj {
       ast::UnOp::Neg => "neg",
       ast::UnOp::Not => "not",
     };
-    let v_func = self.eval_dot(interp, id)?;
+    let v_func = self.eval_get(interp, id)?;
     v_func.eval_call(interp, Vec::new())
   }
 
@@ -44,7 +47,7 @@ pub trait VTrait: GcObj {
       ast::BinOp::Le  => "le",
       ast::BinOp::Ge  => "ge"
     };
-    let v_func = self.eval_dot(interp, id)?;
+    let v_func = self.eval_get(interp, id)?;
     v_func.eval_call(interp, Vec::from([rhs.clone()]))
   }
 
@@ -65,6 +68,7 @@ pub enum VErr {
   RedefinedId(String),
   WrongType,
   DivideByZero,
+  WrongAssign,
   WrongArgs,
   WrongField(String),
   WrongContinue,
@@ -79,7 +83,8 @@ impl fmt::Debug for VErr {
       VErr::RedefinedId(id) => write!(f, "Re-definition of {}", id),
       VErr::WrongType => write!(f, "Type error"),
       VErr::DivideByZero => write!(f, "Division by zero"),
-      VErr::WrongArgs => write!(f, "Division by zero"),
+      VErr::WrongAssign => write!(f, "Invalid assignment"),
+      VErr::WrongArgs => write!(f, "Wrong number of argumenbts"),
       VErr::WrongField(id) => write!(f, "Unknown field {}", id),
       VErr::WrongContinue => write!(f, "Continue outside loop"),
       VErr::WrongBreak => write!(f, "Break outside loop"),

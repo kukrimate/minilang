@@ -103,14 +103,11 @@ LambdaExpr: Expr = {
 
 ExprWithoutBlock: Expr = {
   LambdaExpr,
-  "var" <id:Id> => {
-    Expr::Var(id, Box::new(Expr::Nil))
-  },
   "var" <id:Id> "=" <val:LambdaExpr> => {
     Expr::Var(id, Box::new(val))
   },
-  <id:Id> "=" <val:LambdaExpr> => {
-    Expr::As(id, Box::new(val))
+  <dest:Expr> "=" <val:LambdaExpr> => {
+    Expr::As(Box::new(dest), Box::new(val))
   },
   "continue" => {
     Expr::Continue

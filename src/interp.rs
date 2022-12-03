@@ -109,9 +109,18 @@ impl TypeObj {
 }
 
 impl VTrait for TypeObj {
-  fn eval_dot(&self, _: &mut Interpreter, field: &str) -> VRes {
+  fn eval_get(&self, _: &mut Interpreter, field: &str) -> VRes {
     if let Some(val) = self.env.names.get(field) {
       Ok(val.clone())
+    } else {
+      Err(VErr::WrongField(str::to_owned(field)))
+    }
+  }
+
+  fn eval_set(&mut self, interp: &mut Interpreter, field: &str, val: VRef) -> VRes {
+    if let Some(dest) = self.env.names.get_mut(field) {
+      *dest = val;
+      Ok(VNil::new(interp))
     } else {
       Err(VErr::WrongField(str::to_owned(field)))
     }
@@ -198,31 +207,33 @@ impl Env {
     })
   }
 
-  fn get(&self, id: &str) -> VRes {
-    if let Some(val) = self.names.get(id) {
-      Ok(val.clone())
-    } else if let Some(parent) = &self.parent {
-      parent.get(id)
-    } else {
-      Err(VErr::UnknownId(str::to_owned(id)))
-    }
-  }
-
-  fn replace(&mut self, id: &str, val: VRef) -> Result<(), VErr> {
-    if let Some(dest) = self.names.get_mut(id) {
-      *dest = val;
-      Ok(())
-    } else if let Some(parent) = &mut self.parent {
-      parent.replace(id, val)
-    } else {
-      Err(VErr::UnknownId(str::to_owned(id)))
-    }
-  }
-
   fn insert(&mut self, id: &str, val: VRef) -> Result<(), VErr> {
     match self.names.insert(str::to_owned(id), val) {
       Some(..) => Err(VErr::RedefinedId(str::to_owned(id))),
       None => Ok(())
+    }
+  }
+}
+
+impl VTrait for Env {
+  fn eval_get(&self, interp: &mut Interpreter, id: &str) -> VRes {
+    if let Some(val) = self.names.get(id) {
+      Ok(val.clone())
+    } else if let Some(parent) = &self.parent {
+      parent.eval_get(interp, id)
+    } else {
+      Err(VErr::UnknownId(str::to_owned(id)))
+    }
+  }
+
+  fn eval_set(&mut self, interp: &mut Interpreter, id: &str, val: VRef) -> VRes {
+    if let Some(dest) = self.names.get_mut(id) {
+      *dest = val;
+      Ok(VNil::new(interp))
+    } else if let Some(parent) = &mut self.parent {
+      parent.eval_set(interp, id, val)
+    } else {
+      Err(VErr::UnknownId(str::to_owned(id)))
     }
   }
 }
@@ -268,7 +279,7 @@ impl Interpreter {
       ast::Expr::Bool(b) => Ok(VBool::new(self, b.clone())),
       ast::Expr::Int(i) => Ok(VInt::new(self, i.clone())),
       ast::Expr::Str(s) => Ok(VStr::new(self, str::to_owned(s))),
-      ast::Expr::Id(id) => env.get(id),
+      ast::Expr::Id(id) => env.eval_get(self, id),
       ast::Expr::Call(func, args) => {
         // Evaluate function
         let v_func = self.eval(env, func)?;
@@ -284,7 +295,7 @@ impl Interpreter {
       }
       ast::Expr::Dot(obj, field) => {
         let v_obj = self.eval(env, obj)?;
-        v_obj.eval_dot(self, field)
+        v_obj.eval_get(self, field)
       }
       ast::Expr::Un(op, arg) => {
         let v_arg = self.eval(env, arg)?;
@@ -344,10 +355,23 @@ impl Interpreter {
         env.insert(id, tmp)?;
         Ok(VNil::new(self))
       }
-      ast::Expr::As(id, val) => {
+      ast::Expr::As(dest, val) => {
         let v_val = self.eval(env, val)?;
-        env.replace(id, v_val)?;
-        Ok(VNil::new(self))
+        match &**dest {
+          // Can assign to variable
+          ast::Expr::Id(id) => {
+            env.eval_set(self, id, v_val)
+          }
+          // Can assign  to field
+          ast::Expr::Dot(arg, id) => {
+            let mut v_arg = self.eval(env, arg)?;
+            v_arg.eval_set(self, id, v_val)
+          }
+          // Cannot assign to anything else
+          _ => {
+            return Err(VErr::WrongAssign)
+          }
+        }
       }
       ast::Expr::Continue => {
         Err(VErr::WrongContinue)
@@ -389,7 +413,7 @@ impl Interpreter {
         let v_iter = self.eval(env, iter)?;
         loop {
           // Read next element from iterator
-          let val = v_iter.eval_dot(self, "next")?.eval_call(self, vec![])?;
+          let val = v_iter.eval_get(self, "next")?.eval_call(self, vec![])?;
           if let Some(..) = val.downcast_nil() {
             break
           }
