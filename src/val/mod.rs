@@ -1,7 +1,8 @@
 use crate::ast;
+use crate::interp::*;
+use crate::gc::*;
 use num_bigint::BigInt;
 use std::fmt;
-use std::rc::Rc;
 
 /// Runtime result
 
@@ -9,27 +10,27 @@ pub type VRes = Result<VRef, VErr>;
 
 /// Runtime values
 
-pub type VRef = Rc<dyn VTrait>;
+pub type VRef = GcPtr<dyn VTrait>;
 
-pub trait VTrait {
+pub trait VTrait: GcObj {
   // Call as a function
-  fn eval_call(&self, _: Vec<VRef>) -> VRes { Err(VErr::WrongType) }
+  fn eval_call(&self, _: &mut Interpreter, _: Vec<VRef>) -> VRes { Err(VErr::WrongType) }
 
   // Access field
-  fn eval_dot(&self, _: &str) -> VRes { Err(VErr::WrongType) }
+  fn eval_dot(&self, _: &mut Interpreter, _: &str) -> VRes { Err(VErr::WrongType) }
 
   // Apply a unary operator to it
-  fn eval_un(&self, op: &ast::UnOp) -> VRes {
+  fn eval_un(&self, interp: &mut Interpreter, op: &ast::UnOp) -> VRes {
     let id = match op {
       ast::UnOp::Neg => "neg",
       ast::UnOp::Not => "not",
     };
-    let func = self.eval_dot(id)?;
-    func.eval_call(Vec::new())
+    let v_func = self.eval_dot(interp, id)?;
+    v_func.eval_call(interp, Vec::new())
   }
 
   // Apply a binary operator to it
-  fn eval_bin(&self, op: &ast::BinOp, rhs: &VRef) -> VRes {
+  fn eval_bin(&self, interp: &mut Interpreter, op: &ast::BinOp, rhs: &VRef) -> VRes {
     let id = match op {
       ast::BinOp::Add => "add",
       ast::BinOp::Sub => "sub",
@@ -43,12 +44,12 @@ pub trait VTrait {
       ast::BinOp::Le  => "le",
       ast::BinOp::Ge  => "ge"
     };
-    let func = self.eval_dot(id)?;
-    func.eval_call(Vec::from([rhs.clone()]))
+    let v_func = self.eval_dot(interp, id)?;
+    v_func.eval_call(interp, Vec::from([rhs.clone()]))
   }
 
   // Conversion to string
-  fn to_str(&self) -> Result<Rc<VStr>, VErr> { Err(VErr::WrongType) }
+  fn to_str(&self, _: &mut Interpreter) -> Result<GcPtr<VStr>, VErr> { Err(VErr::WrongType) }
 
   // Type assertions
   fn downcast_nil(&self) -> Option<&VNil> { None }

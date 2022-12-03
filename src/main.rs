@@ -1,13 +1,19 @@
+#![feature(coerce_unsized)]
+#![feature(linked_list_cursors)]
+#![feature(trait_upcasting)]
+#![feature(unsize)]
+
 use lalrpop_util::lalrpop_mod;
 use pico_args;
 use std::fmt;
 use std::path::PathBuf;
 
-mod ast;              // AST definition
-mod interp;           // AST interpreter
 lalrpop_mod!(parse);  // Parser
-mod val;              // Value types
+mod ast;              // AST definition
+mod gc;               // Garbage collector
+mod interp;           // AST interpreter
 mod util;             // Utilities
+mod val;              // Value types
 
 const HELP: &str = "\
 Interpreter
@@ -66,5 +72,6 @@ fn main() {
   let parser = parse::ProgramParser::new();
   let program = parser.parse(&input).unwrap();
   // Execute program
-  interp::execute(&program).unwrap();
+  let mut interpreter = interp::Interpreter::new();
+  interpreter.execute(&program).unwrap();
 }
