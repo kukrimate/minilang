@@ -82,22 +82,17 @@ pub struct Env {
 }
 
 impl Env {
-  fn root(interp: &mut Interpreter) -> GcPtr<Env> {
-    let names = HashMap::from([
-      (str::to_owned("print"), interp.alloc(Val::Builtin(builtin_print, 1))),
-      (str::to_owned("time"), interp.alloc(Val::Builtin(builtin_time, 0)))
-    ]);
-    interp.alloc(Self {
-      parent: None,
-      names: names
-    })
+  fn root(names: HashMap<String, VRef>) -> Env {
+    Self {
+      parent: None, names
+    }
   }
 
-  fn child(interp: &mut Interpreter, parent: GcPtr<Env>) -> GcPtr<Env> {
-    interp.alloc(Self {
+  fn child(parent: GcPtr<Env>) -> Env {
+    Self {
       parent: Some(parent),
       names: HashMap::new()
-    })
+    }
   }
 
   fn insert(&mut self, id: &str, val: VRef) -> Result<(), VErr> {
@@ -165,15 +160,30 @@ fn builtin_time(interp: &mut Interpreter, _: Vec<VRef>) -> VRes {
 
 /// AST interpreter
 
-pub struct Interpreter { gc: GcHeap, eval_cnt: usize }
+pub struct Interpreter {
+  gc: GcHeap,
+  eval_cnt: usize
+}
 
 impl Interpreter {
   pub fn new() -> Self {
-    Self { gc: GcHeap::new(), eval_cnt: 0 }
+    Self {
+      gc: GcHeap::new(),
+      eval_cnt: 0
+    }
   }
 
   pub fn execute(&mut self, ast::Program(exprs): &ast::Program) -> Result<(), VErr> {
-    let env = Env::root(self);
+    // Builtin functions
+    let builtins = HashMap::from([
+      (str::to_owned("print"), self.alloc(Val::Builtin(builtin_print, 1))),
+      (str::to_owned("time"), self.alloc(Val::Builtin(builtin_time, 0)))
+    ]);
+
+    // Create root environment
+    let env = self.alloc(Env::root(builtins));
+
+    // Evaluate program
     for expr in exprs.iter() {
       self.eval(env, expr)?;
     }
@@ -181,13 +191,7 @@ impl Interpreter {
   }
 
   fn eval(&mut self, mut env: GcPtr<Env>, expr: &ast::Expr) -> VRes {
-    // Increase eval count
-    self.eval_cnt += 1;
-    // Run GC cycle
-    if self.eval_cnt > 10000 {
-      // self.gc.collect(env);
-      self.eval_cnt = 0;
-    }
+    // self.maybe_gc();
 
     match expr {
       ast::Expr::Nil => Ok(self.alloc(Val::Nil)),
@@ -200,7 +204,8 @@ impl Interpreter {
 
         let mut v_args = Vec::new();
         for arg in args.iter() {
-          v_args.push(self.eval(env, arg)?);
+          let v_arg = self.eval(env, arg)?;
+          v_args.push(v_arg);
         }
 
         self.eval_call(v_func, v_args)
@@ -216,6 +221,7 @@ impl Interpreter {
       ast::Expr::Bin(op, lhs, rhs) => {
         let v_lhs = self.eval(env, lhs)?;
         let v_rhs = self.eval(env, rhs)?;
+
         self.eval_bin(op, v_lhs, v_rhs)
       }
       ast::Expr::And(lhs, rhs) => {
@@ -254,7 +260,8 @@ impl Interpreter {
       }
       ast::Expr::Block(exprs) => {
         // Create block environment
-        let block_env = Env::child(self, env);
+        let block_env = self.alloc(Env::child(env));
+
         // Evaluate block body
         let mut val = self.alloc(Val::Nil);
         for expr in exprs.iter() {
@@ -263,8 +270,8 @@ impl Interpreter {
         Ok(val)
       }
       ast::Expr::Var(id, val) => {
-        let tmp = self.eval(env, val)?;
-        env.insert(id, tmp)?;
+        let v_val = self.eval(env, val)?;
+        env.insert(id, v_val)?;
         Ok(self.alloc(Val::Nil))
       }
       ast::Expr::As(dest, val) => {
@@ -329,7 +336,7 @@ impl Interpreter {
             break
           }
           // Create environment
-          let mut forenv = Env::child(self, env);
+          let mut forenv = self.alloc(Env::child(env));
           forenv.insert(id, val)?;
           // Evaluate body
           match self.eval(forenv, body) {
@@ -366,7 +373,7 @@ impl Interpreter {
           return Err(VErr::WrongArgs)
         }
         // Bind arguments to parameters
-        let mut env = Env::child(self, *def_env);
+        let mut env = self.alloc(Env::child(*def_env));
         for (param, arg) in unsafe{(**params).iter()}.zip(args.into_iter()) {
           env.insert(param, arg)?;
         }
@@ -382,7 +389,7 @@ impl Interpreter {
           return Err(VErr::WrongArgs)
         }
         // Create fields
-        let mut env = Env::child(self, *def_env);
+        let mut env = self.alloc(Env::child(*def_env));
         for (id, val) in unsafe{(**fields).iter()}.zip(args.into_iter()) {
           env.insert(id, val)?;
         }
@@ -405,6 +412,16 @@ impl Interpreter {
         native_fn(self, args)
       }
       _ => Err(VErr::WrongType)
+    }
+  }
+
+  fn maybe_gc(&mut self) {
+    // Increase eval count
+    self.eval_cnt += 1;
+    // Run GC cycle
+    if self.eval_cnt > 1 {
+      // self.gc.collect(&self.root_set);
+      self.eval_cnt = 0;
     }
   }
 

@@ -45,8 +45,10 @@ impl GcHeap {
     }
   }
 
-  pub fn collect(&mut self, root_obj: GcPtr<dyn GcObj>) {
-    self.mark(root_obj);
+  pub fn collect(&mut self, root_set: &[GcPtr<dyn GcObj>]) {
+    for root_obj in root_set.iter() {
+      self.mark(*root_obj);
+    }
     self.sweep();
   }
 
@@ -76,9 +78,9 @@ impl GcHeap {
       } else {
         // Otherwise remove the mark
         object.mark = false;
+        // Forward cursor
+        cursor.move_next();
       }
-      // Forward cursor
-      cursor.move_next();
     }
   }
 }
