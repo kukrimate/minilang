@@ -83,6 +83,12 @@ impl GcHeap {
   }
 }
 
+impl<T: ?Sized + GcObj> GcPtr<T> {
+  pub fn ptr_eq(&self, other: GcPtr<T>) -> bool {
+    self.0 == other.0
+  }
+}
+
 impl<T: ?Sized + Unsize<U> + GcObj, U: ?Sized + GcObj>
   CoerceUnsized<GcPtr<U>> for GcPtr<T> {}
 
