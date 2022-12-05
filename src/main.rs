@@ -1,4 +1,5 @@
 #![feature(coerce_unsized)]
+#![feature(hash_raw_entry)]
 #![feature(linked_list_cursors)]
 #![feature(unsize)]
 
@@ -71,11 +72,10 @@ fn main() {
   let parser = parse::ProgramParser::new();
   let program = parser.parse(&input).unwrap();
 
-  // Compile program
-  let instructions = compile::compile_program(&program).unwrap();
-  println!("{:#?}", instructions);
-
-  // Execute program
+  // Create virtual machine
   let mut vm = vm::Vm::new();
-  vm.execute(&instructions).unwrap();
+  // Compile program
+  compile::compile_program(&mut vm, &program).unwrap();
+  // Execute program
+  vm.execute().unwrap();
 }

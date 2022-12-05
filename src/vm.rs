@@ -6,6 +6,9 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Number of instructions between GC cycles
+
+const GC_THRESHOLD: usize = 10000;
 
 /// Runtime result
 
@@ -24,6 +27,32 @@ pub enum Val {
   Ctor(GcPtr<Env>, Vec<String>, Vec<(String, Vec<String>, usize)>),
   Obj(GcPtr<Env>),
   Builtin(BuiltinFn, usize)
+}
+
+impl PartialEq for Val {
+  fn eq(&self, rhs: &Val) -> bool {
+    match (self, rhs) {
+      (Val::Nil, Val::Nil) => true,
+      (Val::Bool(a), Val::Bool(b)) => a == b,
+      (Val::Int(a), Val::Int(b)) => a == b,
+      (Val::Str(a), Val::Str(b)) => a == b,
+      _ => false
+    }
+  }
+}
+
+impl Eq for Val {}
+
+impl core::hash::Hash for Val {
+  fn hash<H: core::hash::Hasher>(&self, h: &mut H) {
+    match self {
+      Val::Nil      => { 0.hash(h); }
+      Val::Bool(a)  => { 1.hash(h); a.hash(h); }
+      Val::Int(a)   => { 2.hash(h); a.hash(h); }
+      Val::Str(a)   => { 3.hash(h); a.hash(h); }
+      _ => todo!()
+    }
+  }
 }
 
 type BuiltinFn = fn(&mut Vm, Vec<VRef>) -> VRes;
@@ -157,25 +186,34 @@ fn builtin_time(vm: &mut Vm, _: Vec<VRef>) -> VRes {
 pub struct Vm {
   // Garbage collector
   gc: GcHeap,
+  // Constant pool
+  const_pool: HashMap<GcPtr<Val>, ()>,
+  // Instruction table
+  instructions: Vec<Insn>,
   // Value stack
   val_stack: Vec<GcPtr<Val>>,
   // Environment stack
   env_stack: Vec<GcPtr<Env>>,
   // Function call stack
-  call_stack: Vec<usize>
+  call_stack: Vec<usize>,
+  // Instruction counter
+  insn_cnt: usize
 }
 
 impl Vm {
   pub fn new() -> Self {
     Self {
       gc: GcHeap::new(),
+      const_pool: HashMap::new(),
+      instructions: Vec::new(),
       val_stack: Vec::new(),
       env_stack: Vec::new(),
-      call_stack: Vec::new()
+      call_stack: Vec::new(),
+      insn_cnt: 0
     }
   }
 
-  pub fn execute(&mut self, instructions: &Vec<Insn>) -> Result<(), VErr> {
+  pub fn execute(&mut self) -> Result<(), VErr> {
     // Root environment
     {
       let builtins = HashMap::from([
@@ -186,28 +224,20 @@ impl Vm {
       self.push_env(root_env);
     }
 
+    // Main interpreter loop
     let mut cur_ip = 0;
 
     loop {
-      let insn = unsafe { instructions.get_unchecked(cur_ip) };
+      // Perform garbage collection if needed
+      self.maybe_gc();
+
+      // Interpret next instruction
+      let insn = unsafe { &*(self.instructions.get_unchecked(cur_ip) as *const _) };
       cur_ip += 1;
 
       match insn {
-        Insn::Nil => {
-          let val = self.alloc(Val::Nil);
-          self.push_val(val);
-        }
-        Insn::Bool(v) => {
-          let val = self.alloc(Val::Bool(v.clone()));
-          self.push_val(val);
-        }
-        Insn::Int(v) => {
-          let val = self.alloc(Val::Int(v.clone()));
-          self.push_val(val);
-        }
-        Insn::Str(v) => {
-          let val = self.alloc(Val::Str(v.clone()));
-          self.push_val(val);
+        Insn::Const(val) => {
+          self.push_val(*val);
         }
         Insn::Func(params, func_ip) => {
           let val = self.alloc(Val::Func(self.peek_env(), params.clone(), func_ip.clone()));
@@ -430,7 +460,53 @@ impl Vm {
     }
   }
 
+  #[inline(always)]
+  fn maybe_gc(&mut self) {
+    self.insn_cnt += 1;
+    if self.insn_cnt > GC_THRESHOLD {
+      self.insn_cnt = 0;
+      for (cval, _) in self.const_pool.iter() {
+        self.gc.mark(*cval);
+      }
+      for val in self.val_stack.iter() {
+        self.gc.mark(*val);
+      }
+      for env in self.env_stack.iter() {
+        self.gc.mark(*env);
+      }
+      self.gc.sweep();
+    }
+  }
+
   fn alloc<T: 'static + GcObj>(&mut self, val: T) -> GcPtr<T> {
     self.gc.alloc(val)
+  }
+
+  pub fn emit_const(&mut self, val: Val) {
+    // Safety: this splits the mutably borrowed self into two non-overlapping
+    // references to the garbage collector and to the constant pool
+    let gc: &mut GcHeap = unsafe { &mut *(&mut self.gc as *mut _) };
+    // Now using the raw entry API we can avoid a GC allocation when
+    // a previous constant with the same value was found
+    let (ptr, _) = self.const_pool
+                        .raw_entry_mut()
+                        .from_key(&val)
+                        .or_insert_with(|| (gc.alloc(val), ()));
+    // And finally we can emit an instruction that pushes the constant to the stack
+    self.instructions.push(Insn::Const(*ptr));
+  }
+
+  pub fn emit(&mut self, insn: Insn) -> usize {
+    let index = self.instructions.len();
+    self.instructions.push(insn);
+    index
+  }
+
+  pub fn insn_cnt(&self) -> usize {
+    self.instructions.len()
+  }
+
+  pub fn patch(&mut self, at: usize, insn: Insn) {
+    self.instructions[at] = insn;
   }
 }

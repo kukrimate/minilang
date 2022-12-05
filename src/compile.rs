@@ -1,13 +1,11 @@
 use crate::ast;
-use num_bigint::BigInt;
+use crate::vm::*;
+use crate::gc::*;
 
-#[derive(Debug)]
 pub enum Insn {
-  // Values
-  Nil,
-  Bool(bool),
-  Int(BigInt),
-  Str(String),
+  // Constant
+  Const(GcPtr<Val>),
+  // Functions and type constructors
   Func(Vec<String>, usize),
   Ctor(Vec<String>, Vec<(String, Vec<String>, usize)>),
   // Variables
@@ -48,8 +46,8 @@ pub enum CErr {
   ReturnOutsideFunc
 }
 
-struct Compiler {
-  instructions: Vec<Insn>,
+struct Compiler<'a> {
+  vm: &'a mut Vm,
   funcs: Vec<FuncCtx>,
   loops: Vec<LoopCtx>,
 }
@@ -64,10 +62,10 @@ struct LoopCtx {
   breaks: Vec<usize>
 }
 
-impl Compiler {
-  fn new() -> Compiler {
+impl<'a> Compiler<'a> {
+  fn new(vm: &'a mut Vm) -> Compiler {
     Compiler {
-      instructions: Vec::new(),
+      vm,
       funcs: Vec::new(),
       loops: Vec::new()
     }
@@ -77,56 +75,48 @@ impl Compiler {
 
   fn compile_value_expr(&mut self, expr: &ast::Expr) -> Result<(), CErr> {
     match expr {
-      ast::Expr::Nil => {
-        self.emit(Insn::Nil);
-      }
-      ast::Expr::Bool(b) => {
-        self.emit(Insn::Bool(b.clone()));
-      }
-      ast::Expr::Int(i) => {
-        self.emit(Insn::Int(i.clone()));
-      }
-      ast::Expr::Str(s) => {
-        self.emit(Insn::Str(s.clone()));
-      }
-      ast::Expr::Id(id) => {
-        self.emit(Insn::Load(id.clone()));
-      }
+      ast::Expr::Nil => { self.vm.emit_const(Val::Nil); }
+      ast::Expr::Bool(b) => { self.vm.emit_const(Val::Bool(b.clone())); }
+      ast::Expr::Int(i) => { self.vm.emit_const(Val::Int(i.clone())); }
+      ast::Expr::Str(s) => { self.vm.emit_const(Val::Str(s.clone())); }
+      ast::Expr::Id(id) => { self.vm.emit(Insn::Load(id.clone())); }
       ast::Expr::Call(func, args) => {
         for arg in args.iter() {
           self.compile_value_expr(arg)?;
         }
         self.compile_value_expr(func)?;
-        self.emit(Insn::Call(args.len()));
+        self.vm.emit(Insn::Call(args.len()));
       }
       ast::Expr::Dot(obj, id) => {
         self.compile_value_expr(obj)?;
-        self.emit(Insn::LoadField(id.clone()));
+        self.vm.emit(Insn::LoadField(id.clone()));
       }
       ast::Expr::Un(op, arg) => {
         self.compile_value_expr(arg)?;
-        self.emit(Insn::Un(op.clone()));
+        self.vm.emit(Insn::Un(op.clone()));
       }
       ast::Expr::Bin(op, lhs, rhs) => {
         self.compile_value_expr(lhs)?;
         self.compile_value_expr(rhs)?;
-        self.emit(Insn::Bin(op.clone()));
+        self.vm.emit(Insn::Bin(op.clone()));
       }
       ast::Expr::And(lhs, rhs) => {
         self.compile_value_expr(lhs)?;
-        self.emit(Insn::Dup);
-        let patch1 = self.emit(Insn::JumpFalse(0));
-        self.emit(Insn::Discard);
+        self.vm.emit(Insn::Dup);
+        let patch1 = self.vm.emit(Insn::JumpFalse(0));
+        self.vm.emit(Insn::Discard);
         self.compile_value_expr(rhs)?;
-        self.instructions[patch1] = Insn::JumpFalse(self.cur_ip());
+        let end_ip = self.vm.insn_cnt();
+        self.vm.patch(patch1, Insn::JumpFalse(end_ip));
       }
       ast::Expr::Or(lhs, rhs) => {
         self.compile_value_expr(lhs)?;
-        self.emit(Insn::Dup);
-        let patch1 = self.emit(Insn::JumpTrue(0));
-        self.emit(Insn::Discard);
+        self.vm.emit(Insn::Dup);
+        let patch1 = self.vm.emit(Insn::JumpTrue(0));
+        self.vm.emit(Insn::Discard);
         self.compile_value_expr(rhs)?;
-        self.instructions[patch1] = Insn::JumpTrue(self.cur_ip());
+        let end_ip = self.vm.insn_cnt();
+        self.vm.patch(patch1, Insn::JumpTrue(end_ip));
       }
       ast::Expr::Block(exprs) => {
         if exprs.len() > 0 {
@@ -142,26 +132,27 @@ impl Compiler {
           self.compile_exit();
         } else {
           // If there are no expressions the block yields nil
-          self.emit(Insn::Nil);
+          self.vm.emit_const(Val::Nil);
         }
       }
       ast::Expr::If(cond, arg1, arg2) => {
         // Compile conditional jump
         self.compile_value_expr(cond)?;
-        let patch1 = self.emit(Insn::JumpFalse(0));
+        let patch1 = self.vm.emit(Insn::JumpFalse(0));
         // Compile true case
         self.compile_value_expr(arg1)?;
-        let patch2 = self.emit(Insn::Jump(0));
+        let patch2 = self.vm.emit(Insn::Jump(0));
         // Compile false case
-        let false_ip = self.cur_ip();
+        let false_ip = self.vm.insn_cnt();
         self.compile_value_expr(arg2)?;
         // Backpatch jump targets
-        self.instructions[patch1] = Insn::JumpFalse(false_ip);
-        self.instructions[patch2] = Insn::Jump(self.cur_ip());
+        self.vm.patch(patch1, Insn::JumpFalse(false_ip));
+        let end_ip = self.vm.insn_cnt();
+        self.vm.patch(patch2, Insn::Jump(end_ip));
       }
       ast::Expr::Lambda(params, body) => {
         let func_ip = self.compile_func(body)?;
-        self.emit(Insn::Func(params.clone(), func_ip));
+        self.vm.emit(Insn::Func(params.clone(), func_ip));
       }
       // These expressions only have side effects, and always yield nil
       ast::Expr::Var(..) |
@@ -174,7 +165,7 @@ impl Compiler {
       ast::Expr::Func(..) |
       ast::Expr::Type(..) => {
         self.compile_side_effect_expr(expr)?;
-        self.emit(Insn::Nil);
+        self.vm.emit_const(Val::Nil);
       }
     }
     Ok(())
@@ -195,8 +186,8 @@ impl Compiler {
           self.compile_value_expr(arg)?;
         }
         self.compile_value_expr(func)?;
-        self.emit(Insn::Call(args.len()));
-        self.emit(Insn::Discard);
+        self.vm.emit(Insn::Call(args.len()));
+        self.vm.emit(Insn::Discard);
       }
       ast::Expr::Dot(obj, _) => {
         self.compile_side_effect_expr(obj)?;
@@ -210,15 +201,17 @@ impl Compiler {
       }
       ast::Expr::And(lhs, rhs) => {
         self.compile_value_expr(lhs)?;
-        let patch1 = self.emit(Insn::JumpFalse(0));
+        let patch1 = self.vm.emit(Insn::JumpFalse(0));
         self.compile_side_effect_expr(rhs)?;
-        self.instructions[patch1] = Insn::JumpFalse(self.cur_ip());
+        let end_ip = self.vm.insn_cnt();
+        self.vm.patch(patch1, Insn::JumpFalse(end_ip));
       }
       ast::Expr::Or(lhs, rhs) => {
         self.compile_value_expr(lhs)?;
-        let patch1 = self.emit(Insn::JumpTrue(0));
+        let patch1 = self.vm.emit(Insn::JumpTrue(0));
         self.compile_side_effect_expr(rhs)?;
-        self.instructions[patch1] = Insn::JumpTrue(self.cur_ip());
+        let end_ip = self.vm.insn_cnt();
+        self.vm.patch(patch1, Insn::JumpTrue(end_ip));
       }
       ast::Expr::Block(exprs) => {
         if exprs.len() > 0 {
@@ -233,7 +226,7 @@ impl Compiler {
       }
       ast::Expr::Var(id, val) => {
         self.compile_value_expr(val)?;
-        self.emit(Insn::Declare(id.clone()));
+        self.vm.emit(Insn::Declare(id.clone()));
       }
       ast::Expr::As(dest, val) => {
         self.compile_value_expr(val)?;
@@ -252,42 +245,42 @@ impl Compiler {
       ast::Expr::If(cond, arg1, arg2) => {
         // Compile conditional jump
         self.compile_value_expr(cond)?;
-        let patch1 = self.emit(Insn::JumpFalse(0));
+        let patch1 = self.vm.emit(Insn::JumpFalse(0));
         // Compile true case
         self.compile_side_effect_expr(arg1)?;
-        let patch2 = self.emit(Insn::Jump(0));
+        let patch2 = self.vm.emit(Insn::Jump(0));
         // Compile false case
-        let false_ip = self.cur_ip();
+        let false_ip = self.vm.insn_cnt();
         self.compile_side_effect_expr(arg2)?;
         // Backpatch jump targets
-        self.instructions[patch1] = Insn::JumpFalse(false_ip);
-        self.instructions[patch2] = Insn::Jump(self.cur_ip());
+        self.vm.patch(patch1, Insn::JumpFalse(false_ip));
+        self.vm.patch(patch2, Insn::Jump(self.vm.insn_cnt()));
       }
       ast::Expr::While(cond, body) => {
         // Save continue pooint
-        let cont_ip = self.cur_ip();
+        let cont_ip = self.vm.insn_cnt();
 
         // Compile conditional
         self.compile_value_expr(cond)?;
-        let patch1 = self.emit(Insn::JumpFalse(0));
+        let patch1 = self.vm.emit(Insn::JumpFalse(0));
 
         // Compile loop body
         let ctx = self.compile_loop(|this| {
           this.compile_side_effect_expr(body)
         })?;
         // Jump back to start
-        self.emit(Insn::Jump(cont_ip));
+        self.vm.emit(Insn::Jump(cont_ip));
 
         // Save break point
-        let brk_ip = self.cur_ip();
+        let brk_ip = self.vm.insn_cnt();
 
         // Backpatch jump targets
-        self.instructions[patch1] = Insn::JumpFalse(brk_ip);
+        self.vm.patch(patch1, Insn::JumpFalse(brk_ip));
         for patch in ctx.continues.iter() {
-          self.instructions[*patch] = Insn::Jump(cont_ip);
+          self.vm.patch(*patch, Insn::Jump(cont_ip));
         }
         for patch in ctx.breaks.iter() {
-          self.instructions[*patch] = Insn::Jump(brk_ip);
+          self.vm.patch(*patch, Insn::Jump(brk_ip));
         }
       }
       ast::Expr::For(id, iter, body) => {
@@ -295,51 +288,51 @@ impl Compiler {
         self.compile_value_expr(iter)?;
 
         // Save continue point
-        let cont_ip = self.cur_ip();
+        let cont_ip = self.vm.insn_cnt();
 
         // Read next value from iterator
-        self.emit(Insn::Dup);
-        self.emit(Insn::LoadField(String::from("next")));
-        self.emit(Insn::Call(0));
+        self.vm.emit(Insn::Dup);
+        self.vm.emit(Insn::LoadField(String::from("next")));
+        self.vm.emit(Insn::Call(0));
 
         // Jump to end if nil
-        self.emit(Insn::Dup);
-        self.emit(Insn::Nil);
-        self.emit(Insn::Bin(ast::BinOp::Eq));
-        let patch1 = self.emit(Insn::JumpTrue(0));
+        self.vm.emit(Insn::Dup);
+        self.vm.emit_const(Val::Nil);
+        self.vm.emit(Insn::Bin(ast::BinOp::Eq));
+        let patch1 = self.vm.emit(Insn::JumpTrue(0));
 
         // Compile loop body
         let ctx = self.compile_loop(|this| {
           this.compile_enter();
-          this.emit(Insn::Declare(id.clone()));
+          this.vm.emit(Insn::Declare(id.clone()));
           this.compile_side_effect_expr(body)?;
           this.compile_exit();
           Ok(())
         })?;
 
         // Jump back to start
-        self.emit(Insn::Jump(cont_ip));
+        self.vm.emit(Insn::Jump(cont_ip));
 
         // Save break point
-        let brk_ip = self.cur_ip();
+        let brk_ip = self.vm.insn_cnt();
 
         // Remove iterator and nil from stack
-        self.emit(Insn::Discard);
-        self.emit(Insn::Discard);
+        self.vm.emit(Insn::Discard);
+        self.vm.emit(Insn::Discard);
 
         // Backpatch jump targets
-        self.instructions[patch1] = Insn::JumpTrue(brk_ip);
+        self.vm.patch(patch1, Insn::JumpTrue(brk_ip));
         for patch in ctx.continues.iter() {
-          self.instructions[*patch] = Insn::Jump(cont_ip);
+          self.vm.patch(*patch, Insn::Jump(cont_ip));
         }
         for patch in ctx.breaks.iter() {
-          self.instructions[*patch] = Insn::Jump(brk_ip);
+          self.vm.patch(*patch, Insn::Jump(brk_ip));
         }
       }
       ast::Expr::Func((id, params, body)) => {
         let func_ip = self.compile_func(body)?;
-        self.emit(Insn::Func(params.clone(), func_ip));
-        self.emit(Insn::Declare(id.clone()));
+        self.vm.emit(Insn::Func(params.clone(), func_ip));
+        self.vm.emit(Insn::Declare(id.clone()));
       }
       ast::Expr::Type(id, fields, parsed_methods) => {
         let mut methods = vec![];
@@ -347,8 +340,8 @@ impl Compiler {
           let method_ip = self.compile_func(body)?;
           methods.push((name.clone(), params.clone(), method_ip));
         }
-        self.emit(Insn::Ctor(fields.clone(), methods));
-        self.emit(Insn::Declare(id.clone()));
+        self.vm.emit(Insn::Ctor(fields.clone(), methods));
+        self.vm.emit(Insn::Declare(id.clone()));
       }
     }
     Ok(())
@@ -368,28 +361,29 @@ impl Compiler {
   fn compile_func(&mut self, body: &ast::Expr) -> Result<usize, CErr>
   {
     // Jump over function
-    let patch1 = self.emit(Insn::Jump(0));
+    let patch1 = self.vm.emit(Insn::Jump(0));
     // Save beginning of the function
-    let func_ip = self.cur_ip();
+    let func_ip = self.vm.insn_cnt();
     // Compile function body
     self.funcs.push(FuncCtx { block_cnt: 0 });
     self.compile_value_expr(body)?;
-    self.emit(Insn::Return);
+    self.vm.emit(Insn::Return);
     self.funcs.pop();
     // Backpatch jump target
-    self.instructions[patch1] = Insn::Jump(self.cur_ip());
+    let end_ip = self.vm.insn_cnt();
+    self.vm.patch(patch1, Insn::Jump(end_ip));
     Ok(func_ip)
   }
 
   fn compile_assignment(&mut self, dest: &ast::Expr) -> Result<(), CErr> {
     match dest {
       ast::Expr::Id(id) => {
-        self.emit(Insn::Store(id.clone()));
+        self.vm.emit(Insn::Store(id.clone()));
         Ok(())
       }
       ast::Expr::Dot(obj, id) => {
         self.compile_value_expr(obj)?;
-        self.emit(Insn::StoreField(id.clone()));
+        self.vm.emit(Insn::StoreField(id.clone()));
         Ok(())
       }
       _ => {
@@ -405,7 +399,7 @@ impl Compiler {
     if let Some(curloop) = self.loops.last_mut() {
       curloop.block_cnt += 1;
     }
-    self.emit(Insn::Enter);
+    self.vm.emit(Insn::Enter);
   }
 
   fn compile_exit(&mut self) {
@@ -415,12 +409,12 @@ impl Compiler {
     if let Some(curloop) = self.loops.last_mut() {
       curloop.block_cnt -= 1;
     }
-    self.emit(Insn::Exit);
+    self.vm.emit(Insn::Exit);
   }
 
   fn compile_continue(&mut self) -> Result<(), CErr> {
-    for _ in 0..self.loops.last().unwrap().block_cnt { self.emit(Insn::Exit); }
-    let patch = self.emit(Insn::Jump(0));
+    for _ in 0..self.loops.last().unwrap().block_cnt { self.vm.emit(Insn::Exit); }
+    let patch = self.vm.emit(Insn::Jump(0));
     if let Some(curloop) = self.loops.last_mut() {
       curloop.continues.push(patch);
       Ok(())
@@ -430,8 +424,8 @@ impl Compiler {
   }
 
   fn compile_break(&mut self) -> Result<(), CErr> {
-    for _ in 0..self.loops.last().unwrap().block_cnt { self.emit(Insn::Exit); }
-    let patch = self.emit(Insn::Jump(0));
+    for _ in 0..self.loops.last().unwrap().block_cnt { self.vm.emit(Insn::Exit); }
+    let patch = self.vm.emit(Insn::Jump(0));
     if let Some(curloop) = self.loops.last_mut() {
       curloop.breaks.push(patch);
       Ok(())
@@ -442,30 +436,20 @@ impl Compiler {
 
   fn compile_return(&mut self) -> Result<(), CErr> {
     if let Some(_) = self.funcs.last() {
-      for _ in 0..self.funcs.last().unwrap().block_cnt { self.emit(Insn::Exit); }
-      self.emit(Insn::Return);
+      for _ in 0..self.funcs.last().unwrap().block_cnt { self.vm.emit(Insn::Exit); }
+      self.vm.emit(Insn::Return);
       Ok(())
     } else {
       Err(CErr::ReturnOutsideFunc)
     }
   }
-
-  fn cur_ip(&self) -> usize {
-    self.instructions.len()
-  }
-
-  fn emit(&mut self, insn: Insn) -> usize {
-    let index = self.instructions.len();
-    self.instructions.push(insn);
-    index
-  }
 }
 
-pub fn compile_program(ast::Program(exprs): &ast::Program) -> Result<Vec<Insn>, CErr> {
-  let mut compiler = Compiler::new();
+pub fn compile_program(vm: &mut Vm, ast::Program(exprs): &ast::Program) -> Result<(), CErr> {
+  let mut compiler = Compiler::new(vm);
   for expr in exprs.iter() {
     compiler.compile_side_effect_expr(expr)?;
   }
-  compiler.emit(Insn::Terminate);
-  Ok(compiler.instructions)
+  compiler.vm.emit(Insn::Terminate);
+  Ok(())
 }

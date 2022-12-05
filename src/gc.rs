@@ -44,16 +44,9 @@ impl GcHeap {
       GcPtr(mem)
     }
   }
-
-  pub fn collect(&mut self, root_set: &[GcPtr<dyn GcObj>]) {
-    for root_obj in root_set.iter() {
-      self.mark(*root_obj);
-    }
-    self.sweep();
-  }
-
+  
   // I. Mark reachable objects
-  fn mark(&mut self, root_obj: GcPtr<dyn GcObj>) {
+  pub fn mark(&mut self, root_obj: GcPtr<dyn GcObj>) {
     fn mark(ptr: GcPtr<dyn GcObj>) {
       unsafe {
         // If the object wasn't marked before
@@ -69,7 +62,7 @@ impl GcHeap {
   }
 
   // II. Sweep unmarked objects
-  fn sweep(&mut self) {
+  pub fn sweep(&mut self) {
     let mut cursor = self.objects.cursor_front_mut();
     while let Some(object) = cursor.current() {
       if object.mark == false {
@@ -125,5 +118,19 @@ impl<T: ?Sized + GcObj> core::ops::Deref for GcPtr<T> {
 impl<T: ?Sized + GcObj> core::ops::DerefMut for GcPtr<T> {
   fn deref_mut(&mut self) -> &mut T {
     unsafe { &mut (*self.0).val }
+  }
+}
+
+impl<T: ?Sized + GcObj + PartialEq> PartialEq for GcPtr<T> {
+  fn eq(&self, rhs: &GcPtr<T>) -> bool {
+    unsafe { (*self.0).val == (*rhs.0).val }
+  }
+}
+
+impl<T: ?Sized + GcObj + Eq> Eq for GcPtr<T> {}
+
+impl<T: ?Sized + GcObj + std::hash::Hash> core::hash::Hash for GcPtr<T> {
+  fn hash<H: core::hash::Hasher>(&self, h: &mut H) {
+    unsafe { (*self.0).val.hash(h); }
   }
 }
