@@ -9,8 +9,9 @@ use std::path::PathBuf;
 
 lalrpop_mod!(parse);  // Parser
 mod ast;              // AST definition
+mod compile;          // Bytecode compiler
 mod gc;               // Garbage collector
-mod interp;           // AST interpreter
+mod vm;               // Virtual machine
 mod util;             // Utilities
 
 const HELP: &str = "\
@@ -69,7 +70,12 @@ fn main() {
   // Parse program
   let parser = parse::ProgramParser::new();
   let program = parser.parse(&input).unwrap();
+
+  // Compile program
+  let instructions = compile::compile_program(&program).unwrap();
+  println!("{:#?}", instructions);
+
   // Execute program
-  let mut interpreter = interp::Interpreter::new();
-  interpreter.execute(&program).unwrap();
+  let mut vm = vm::Vm::new();
+  vm.execute(&instructions).unwrap();
 }

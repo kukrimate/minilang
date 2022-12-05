@@ -1,0 +1,19 @@
+func strue() {
+  print("side-effect true");
+  true
+}
+
+func sfalse() {
+  print("side-effect false");
+  false
+}
+
+print(sfalse() && sfalse());
+print(strue()  && sfalse());
+print(sfalse() && strue());
+print(strue()  && strue());
+
+print(sfalse() || sfalse());
+print(strue()  || sfalse());
+print(sfalse() || strue());
+print(strue()  || sfalse());
