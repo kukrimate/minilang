@@ -36,7 +36,7 @@ impl fmt::Display for ArgsError {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       Self::HelpRequested => {}
-      Self::PicoArgsError(err) => { err.fmt(f)? }
+      Self::PicoArgsError(err) => { err.fmt(f)?; "\n".fmt(f)?; }
     }
     HELP.fmt(f)
   }
@@ -47,6 +47,8 @@ impl From<pico_args::Error> for ArgsError {
     ArgsError::PicoArgsError(err)
   }
 }
+
+impl std::error::Error for ArgsError {}
 
 struct Args {
   input: PathBuf
@@ -59,23 +61,51 @@ fn parse_args() -> Result<Args, ArgsError> {
   }
 
   Ok(Args {
-    input: pargs.free_from_str()?,
+    input: pargs.free_from_os_str(|path| -> Result<_, ArgsError> { Ok(PathBuf::from(path)) })?,
   })
 }
 
 fn main() {
   // Parse arguments
-  let args = parse_args().unwrap();
+  let args = match parse_args() {
+    Ok(args) => args,
+    Err(err) => {
+      eprintln!("{}", err);
+      std::process::exit(1);
+    }
+  };
+
   // Read program from disk
-  let input = std::fs::read_to_string(args.input).unwrap();
+  let input = match std::fs::read_to_string(&args.input) {
+    Ok(file) => file,
+    Err(err) => {
+      eprintln!("Failed to read {}: {}", args.input.to_string_lossy(), err);
+      std::process::exit(1);
+    }
+  };
+
   // Parse program
   let parser = parse::ProgramParser::new();
   let program = parser.parse(&input).unwrap();
 
   // Create virtual machine
   let mut vm = vm::Vm::new();
+
   // Compile program
-  compile::compile_program(&mut vm, &program).unwrap();
+  match compile::compile_program(&mut vm, &program) {
+    Ok(..) => (),
+    Err(err) => {
+      eprintln!("Failed to compile {}: {}", args.input.to_string_lossy(), err);
+      std::process::exit(1);
+    }
+  }
+
   // Execute program
-  vm.execute().unwrap();
+  match vm.execute() {
+    Ok(..) => (),
+    Err(err) => {
+      eprintln!("Runtime error in {}: {}", args.input.to_string_lossy(), err);
+      std::process::exit(1);
+    }
+  }
 }

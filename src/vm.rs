@@ -3,7 +3,6 @@ use crate::compile::*;
 use crate::gc::*;
 use num_bigint::BigInt;
 use std::collections::HashMap;
-use std::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Number of instructions between GC cycles
@@ -74,6 +73,7 @@ impl GcObj for Val {
 
 /// Runtime error
 
+#[derive(Debug)]
 pub enum VErr {
   UnknownId(String),
   RedefinedId(String),
@@ -83,8 +83,8 @@ pub enum VErr {
   WrongField(String)
 }
 
-impl fmt::Debug for VErr {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for VErr {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       VErr::UnknownId(id) => write!(f, "Unknown identifier {}", id),
       VErr::RedefinedId(id) => write!(f, "Re-definition of {}", id),
@@ -95,6 +95,8 @@ impl fmt::Debug for VErr {
     }
   }
 }
+
+impl std::error::Error for VErr {}
 
 /// Name resolution environment
 

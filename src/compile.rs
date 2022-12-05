@@ -46,6 +46,19 @@ pub enum CErr {
   ReturnOutsideFunc
 }
 
+impl std::fmt::Display for CErr {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      CErr::LValueRequired => write!(f, "Expected lvalue expression"),
+      CErr::ContinueOutsideLoop => write!(f, "Continue outside loop"),
+      CErr::BreakOutsideLoop => write!(f, "Break outside loop"),
+      CErr::ReturnOutsideFunc => write!(f, "Return outside function"),
+    }
+  }
+}
+
+impl std::error::Error for CErr {}
+
 struct Compiler<'a> {
   vm: &'a mut Vm,
   funcs: Vec<FuncCtx>,
