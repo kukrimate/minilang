@@ -23,7 +23,7 @@ struct GcAlloc<T: ?Sized + GcObj> {
 /// Must be implemented by all GC'd objects
 
 pub trait GcObj {
-  fn visit_children(&self, _: fn(GcPtr<dyn GcObj>)) {}
+  fn visit_children(&self, gc: &mut GcHeap);
 }
 
 impl GcHeap {
@@ -46,19 +46,16 @@ impl GcHeap {
   }
   
   // I. Mark reachable objects
-  pub fn mark(&mut self, root_obj: GcPtr<dyn GcObj>) {
-    fn mark(ptr: GcPtr<dyn GcObj>) {
-      unsafe {
-        // If the object wasn't marked before
-        if (*ptr.0).mark == false {
-          // Mark it
-          (*ptr.0).mark = true;
-          // And mark any children it might have
-          (*ptr.0).val.visit_children(mark);
-        }
+  pub fn mark(&mut self, ptr: GcPtr<dyn GcObj>) {
+    unsafe {
+      // If the object wasn't marked before
+      if (*ptr.0).mark == false {
+        // Mark it
+        (*ptr.0).mark = true;
+        // And mark any children it might have
+        (*ptr.0).val.visit_children(self);
       }
     }
-    mark(root_obj);
   }
 
   // II. Sweep unmarked objects
@@ -118,19 +115,5 @@ impl<T: ?Sized + GcObj> core::ops::Deref for GcPtr<T> {
 impl<T: ?Sized + GcObj> core::ops::DerefMut for GcPtr<T> {
   fn deref_mut(&mut self) -> &mut T {
     unsafe { &mut (*self.0).val }
-  }
-}
-
-impl<T: ?Sized + GcObj + PartialEq> PartialEq for GcPtr<T> {
-  fn eq(&self, rhs: &GcPtr<T>) -> bool {
-    unsafe { (*self.0).val == (*rhs.0).val }
-  }
-}
-
-impl<T: ?Sized + GcObj + Eq> Eq for GcPtr<T> {}
-
-impl<T: ?Sized + GcObj + std::hash::Hash> core::hash::Hash for GcPtr<T> {
-  fn hash<H: core::hash::Hasher>(&self, h: &mut H) {
-    unsafe { (*self.0).val.hash(h); }
   }
 }

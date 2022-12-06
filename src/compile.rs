@@ -1,10 +1,9 @@
 use crate::ast;
 use crate::vm::*;
-use crate::gc::*;
 
 pub enum Insn {
   // Constant
-  Const(GcPtr<Val>),
+  Const(Val),
   // Functions and type constructors
   Func(Vec<String>, usize),
   Ctor(Vec<String>, Vec<(String, Vec<String>, usize)>),
