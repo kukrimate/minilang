@@ -2,18 +2,17 @@
 #![feature(hash_raw_entry)]
 #![feature(linked_list_cursors)]
 #![feature(unsize)]
+#![feature(if_let_guard)]
 
-use lalrpop_util::lalrpop_mod;
 use pico_args;
-use std::fmt;
-use std::path::PathBuf;
+use std::path::{PathBuf,Path};
 
-lalrpop_mod!(parse);  // Parser
-mod ast;              // AST definition
+mod ast;              // Abstract syntax tree
+mod parse;            // Syntax analyzer
 mod compile;          // Bytecode compiler
+mod error;            // Error handling
 mod gc;               // Garbage collector
 mod vm;               // Virtual machine
-mod util;             // Utilities
 
 const HELP: &str = "\
 Interpreter
@@ -32,8 +31,8 @@ enum ArgsError {
   PicoArgsError(pico_args::Error)
 }
 
-impl fmt::Display for ArgsError {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for ArgsError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       Self::HelpRequested => {}
       Self::PicoArgsError(err) => { err.fmt(f)?; "\n".fmt(f)?; }
@@ -47,8 +46,6 @@ impl From<pico_args::Error> for ArgsError {
     ArgsError::PicoArgsError(err)
   }
 }
-
-impl std::error::Error for ArgsError {}
 
 struct Args {
   input: PathBuf
@@ -84,28 +81,23 @@ fn main() {
     }
   };
 
-  // Parse program
-  let parser = parse::ProgramParser::new();
-  let program = parser.parse(&input).unwrap();
+  // Create error context
+  let mut err_ctx = error::ErrorContext::new();
 
   // Create virtual machine
   let mut vm = vm::Vm::new();
 
-  // Compile program
-  match compile::compile_program(&mut vm, &program) {
-    Ok(..) => (),
-    Err(err) => {
-      eprintln!("Failed to compile {}: {}", args.input.to_string_lossy(), err);
-      std::process::exit(1);
-    }
-  }
+  // Parse and compile program
+  parse::parse_program(&mut err_ctx, &input)
+    .map(|program|
+      compile::compile_program(&mut err_ctx, &mut vm, &program));
+
+  // Check for parse or compile errors
+  if err_ctx.display_all(&args.input, &input) { std::process::exit(1) }
 
   // Execute program
-  match vm.execute() {
-    Ok(..) => (),
-    Err(err) => {
-      eprintln!("Runtime error in {}: {}", args.input.to_string_lossy(), err);
-      std::process::exit(1);
-    }
-  }
+  vm.execute(&mut err_ctx);
+
+  // Check for runtime errors
+  if err_ctx.display_all(&args.input, &input) { std::process::exit(1) }
 }

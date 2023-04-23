@@ -1,4 +1,5 @@
 use crate::ast;
+use crate::error::*;
 use crate::compile::*;
 use crate::gc::*;
 use num_bigint::BigInt;
@@ -8,10 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Number of instructions between GC cycles
 
 const GC_THRESHOLD: usize = 10000;
-
-/// Runtime result
-
-pub type VRes = Result<Val, VErr>;
 
 /// Runtime values
 
@@ -27,7 +24,7 @@ pub enum Val {
   Builtin(BuiltinFn, usize)
 }
 
-type BuiltinFn = fn(&mut Vm, Vec<Val>) -> VRes;
+type BuiltinFn = fn(&mut Vm, Vec<Val>) -> Val;
 
 impl GcObj for Val {
   fn visit_children(&self, gc: &mut GcHeap) {
@@ -70,34 +67,6 @@ impl PartialEq for Val {
 
 impl Eq for Val {}
 
-
-/// Runtime error
-
-#[derive(Debug)]
-pub enum VErr {
-  UnknownId(String),
-  RedefinedId(String),
-  WrongType,
-  DivideByZero,
-  WrongArgs,
-  WrongField(String)
-}
-
-impl std::fmt::Display for VErr {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      VErr::UnknownId(id) => write!(f, "Unknown identifier {}", id),
-      VErr::RedefinedId(id) => write!(f, "Re-definition of {}", id),
-      VErr::WrongType => write!(f, "Type error"),
-      VErr::DivideByZero => write!(f, "Division by zero"),
-      VErr::WrongArgs => write!(f, "Wrong number of argumenbts"),
-      VErr::WrongField(id) => write!(f, "Unknown field {}", id),
-    }
-  }
-}
-
-impl std::error::Error for VErr {}
-
 /// Name resolution environment
 
 pub struct Env {
@@ -119,31 +88,28 @@ impl Env {
     }
   }
 
-  fn insert(&mut self, id: &str, val: Val) -> Result<(), VErr> {
-    match self.names.insert(str::to_owned(id), val) {
-      Some(..) => Err(VErr::RedefinedId(str::to_owned(id))),
-      None => Ok(())
-    }
+  fn insert(&mut self, id: &str, val: Val) -> bool {
+    self.names.insert(str::to_owned(id), val).is_none()
   }
 
-  fn get(&self, id: &str) -> VRes {
+  fn get(&self, id: &str) -> Option<Val> {
     if let Some(val) = self.names.get(id) {
-      Ok(val.clone())
+      Some(val.clone())
     } else if let Some(parent) = &self.parent {
       parent.get(id)
     } else {
-      Err(VErr::UnknownId(str::to_owned(id)))
+      None
     }
   }
 
-  fn set(&mut self, id: &str, val: Val) -> Result<(), VErr> {
+  fn set(&mut self, id: &str, val: Val) -> bool {
     if let Some(dest) = self.names.get_mut(id) {
       *dest = val;
-      Ok(())
+      true
     } else if let Some(parent) = &mut self.parent {
       parent.set(id, val)
     } else {
-      Err(VErr::UnknownId(str::to_owned(id)))
+      false
     }
   }
 }
@@ -161,7 +127,7 @@ impl GcObj for Env {
 
 /// Builtin implementations
 
-fn builtin_print(_: &mut Vm, args: Vec<Val>) -> VRes {
+fn builtin_print(_: &mut Vm, args: Vec<Val>) -> Val {
   // Convert to string
   match &args[0] {
     Val::Nil      => println!("nil"),
@@ -171,16 +137,16 @@ fn builtin_print(_: &mut Vm, args: Vec<Val>) -> VRes {
                 _ => todo!()
   }
   // Print returns nothing
-  Ok(Val::Nil)
+  Val::Nil
 }
 
-fn builtin_time(_: &mut Vm, _: Vec<Val>) -> VRes {
+fn builtin_time(_: &mut Vm, _: Vec<Val>) -> Val {
   // Get current time as seconds
   let now = BigInt::from(SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .unwrap().as_secs());
   // Return as GC value
-  Ok(Val::Int(now))
+  Val::Int(now)
 }
 
 /// AST interpreter
@@ -212,7 +178,7 @@ impl Vm {
     }
   }
 
-  pub fn execute(&mut self) -> Result<(), VErr> {
+  pub fn execute(&mut self, err_ctx: &mut ErrorContext) {
     // Root environment
     {
       let builtins = HashMap::from([
@@ -244,105 +210,127 @@ impl Vm {
         Insn::Ctor(fields, methods) => {
           self.push_val(Val::Ctor(self.peek_env(), fields.clone(), methods.clone()));
         }
-        Insn::Load(id) => {
-          self.push_val(self.peek_env().get(id)?);
-        }
-        Insn::Store(id) => {
-          let val = self.pop_val();
-          self.peek_env().set(id, val)?;
-        }
-        Insn::Declare(id) => {
-          let val = self.pop_val();
-          self.peek_env().insert(id, val)?;
-        }
-        Insn::LoadField(id) => {
-          match self.pop_val() {
-            Val::Obj(env) => match env.names.get(id) {
-              Some(val) => { self.push_val(val.clone()); }
-              None => return Err(VErr::WrongField(id.clone()))
-            }
-            _ => return Err(VErr::WrongType)
+        Insn::Load(span, id) => {
+          if let Some(val) = self.peek_env().get(id) {
+            self.push_val(val);
+          } else {
+            err_ctx.err(span.clone(), ErrorCondition::UnknownIdentifier(id.to_owned()));
+            return
           }
         }
-        Insn::StoreField(id) => {
-          match self.pop_val() {
-            Val::Obj(mut env) => match env.names.get_mut(id) {
-              Some(dest) => { *dest = self.pop_val(); }
-              None => return Err(VErr::WrongField(id.clone()))
-            }
-            _ => return Err(VErr::WrongType)
+        Insn::Store(span, id) => {
+          if !self.peek_env().set(id, self.pop_val()) {
+            err_ctx.err(span.clone(), ErrorCondition::UnknownIdentifier(id.to_owned()));
+            return
           }
         }
-        Insn::Call(arg_cnt) => {
+        Insn::Declare(span, id) => {
+          if !self.peek_env().insert(id, self.pop_val()) {
+            err_ctx.err(span.clone(), ErrorCondition::RedefinitionOfIdentifier(id.to_owned()));
+            return
+          }
+        }
+        Insn::LoadField(span, id) => {
           match self.pop_val() {
-            Val::Func(env, params, func_ip) => {
-              if *arg_cnt != params.len() {
-                return Err(VErr::WrongArgs)
-              }
+            Val::Obj(env) if let Some(val) = env.names.get(id) => {
+              self.push_val(val.clone());
+            }
+            _ => {
+              err_ctx.err(span.clone(), ErrorCondition::TypeError);
+              return
+            }
+          }
+        }
+        Insn::StoreField(span, id) => {
+          match self.pop_val() {
+            Val::Obj(mut env) if let Some(val) = env.names.get(id) => {
+              *env.names.get_mut(id).unwrap() = self.pop_val();
+            }
+            _ => {
+              err_ctx.err(span.clone(), ErrorCondition::TypeError);
+              return
+            }
+          }
+        }
+        Insn::Call(span, arg_cnt) => {
+          match self.pop_val() {
+            Val::Func(env, params, func_ip) if *arg_cnt == params.len() => {
               // Create environment
               let mut env = self.alloc(Env::child(env));
               for id in params.iter().rev() {
-                env.insert(id, self.pop_val())?;
+                if !env.insert(id, self.pop_val()) {
+                  err_ctx.err(span.clone(), ErrorCondition::RedefinitionOfIdentifier(id.to_owned()));
+                  return
+                }
               }
               self.push_env(env);
               // Push return address and jump to function
               self.call_stack.push(cur_ip);
               cur_ip = func_ip;
             }
-            Val::Ctor(env, fields, methods) => {
-              if *arg_cnt != fields.len() {
-                return Err(VErr::WrongArgs)
-              }
+            Val::Ctor(env, fields, methods) if *arg_cnt == fields.len() => {
               // Create environment
               let mut env = self.alloc(Env::child(env));
               for id in fields.iter().rev() {
-                env.insert(id, self.pop_val())?;
+                if !env.insert(id, self.pop_val()) {
+                  err_ctx.err(span.clone(), ErrorCondition::RedefinitionOfIdentifier(id.to_owned()));
+                  return
+                }
               }
               for (id, params, method_ip) in methods.iter() {
                 let val = Val::Func(env, params.clone(), *method_ip);
-                env.insert(id, val)?;
+                if !env.insert(id, val) {
+                  err_ctx.err(span.clone(), ErrorCondition::RedefinitionOfIdentifier(id.to_owned()));
+                  return
+                }
               }
               // Push type object
               let tmp = Val::Obj(env);
               self.push_val(tmp);
             }
-            Val::Builtin(native_fn, param_cnt) => {
-              if *arg_cnt != param_cnt {
-                return Err(VErr::WrongArgs)
-              }
+            Val::Builtin(native_fn, param_cnt) if *arg_cnt == param_cnt => {
               let args = self.val_stack.split_off(self.val_stack.len() - arg_cnt);
-              let tmp = native_fn(self, args)?;
+              let tmp = native_fn(self, args);
               self.push_val(tmp);
             }
-            _ => return Err(VErr::WrongType)
+            _ => {
+              err_ctx.err(span.clone(), ErrorCondition::TypeError);
+              return
+            }
           }
         }
-        Insn::Un(op) => {
+        Insn::Un(span, op) => {
           let arg = self.pop_val();
-          let tmp = self.eval_un(op, arg)?;
+          let Some(tmp) = self.eval_un(err_ctx, span, op, arg) else { return };
           self.push_val(tmp);
         }
-        Insn::Bin(op) => {
+        Insn::Bin(span, op) => {
           let rhs = self.pop_val();
           let lhs = self.pop_val();
-          let tmp = self.eval_bin(op, lhs, rhs)?;
+          let Some(tmp) = self.eval_bin(err_ctx, span, op, lhs, rhs) else { return };
           self.push_val(tmp);
         }
         Insn::Jump(new_ip) => {
           cur_ip = *new_ip;
         }
-        Insn::JumpTrue(new_ip) => {
+        Insn::JumpTrue(span, new_ip) => {
           match self.pop_val() {
-            Val::Bool(true)   => { cur_ip = *new_ip; }
-            Val::Bool(false)  => {}
-                            _ => return Err(VErr::WrongType)
+            Val::Bool(true) => { cur_ip = *new_ip; }
+            Val::Bool(false) => {}
+            _ => {
+              err_ctx.err(span.clone(), ErrorCondition::TypeError);
+              return
+            }
           }
         }
-        Insn::JumpFalse(new_ip) => {
+        Insn::JumpFalse(span, new_ip) => {
           match self.pop_val() {
-            Val::Bool(true)   => {}
-            Val::Bool(false)  => { cur_ip = *new_ip; }
-                            _ => return Err(VErr::WrongType)
+            Val::Bool(true) => {}
+            Val::Bool(false) => { cur_ip = *new_ip; }
+            _ => {
+              err_ctx.err(span.clone(), ErrorCondition::TypeError);
+              return
+            }
           }
         }
         Insn::Enter => {
@@ -367,8 +355,6 @@ impl Vm {
         }
       }
     }
-
-    Ok(())
   }
 
   #[inline(always)]
@@ -402,45 +388,51 @@ impl Vm {
   }
 
   #[inline(always)]
-  fn eval_un(&mut self, op: &ast::UnOp, arg: Val) -> VRes {
+  fn eval_un(&mut self, err_ctx: &mut ErrorContext, span: &ast::Span, op: &ast::UnOp, arg: Val) -> Option<Val> {
     match (op, arg) {
-      (ast::UnOp::Neg, Val::Int(i))   => Ok(Val::Int(-i)),
-      (ast::UnOp::Not, Val::Bool(b))  => Ok(Val::Bool(!b)),
-
-                                    _ => Err(VErr::WrongType)
+      (ast::UnOp::Neg, Val::Int(i)) => Some(Val::Int(-i)),
+      (ast::UnOp::Not, Val::Bool(b)) => Some(Val::Bool(!b)),
+      _ => {
+        err_ctx.err(span.clone(), ErrorCondition::TypeError);
+        None
+      }
     }
   }
 
   #[inline(always)]
-  fn eval_bin(&mut self, op: &ast::BinOp, lhs: Val, rhs: Val) -> VRes {
+  fn eval_bin(&mut self, err_ctx: &mut ErrorContext, span: &ast::Span, op: &ast::BinOp, lhs: Val, rhs: Val) -> Option<Val> {
     use ast::BinOp::*;
     match (op, lhs, rhs) {
       // Int
-      (Add, Val::Int(a), Val::Int(b))   => Ok(Val::Int(a + b)),
-      (Sub, Val::Int(a), Val::Int(b))   => Ok(Val::Int(a - b)),
-      (Mul, Val::Int(a), Val::Int(b))   => Ok(Val::Int(a * b)),
+      (Add, Val::Int(a), Val::Int(b)) => Some(Val::Int(a + b)),
+      (Sub, Val::Int(a), Val::Int(b)) => Some(Val::Int(a - b)),
+      (Mul, Val::Int(a), Val::Int(b)) => Some(Val::Int(a * b)),
       (Div|Mod, Val::Int(_), Val::Int(b)) if b == BigInt::from(0i32) => {
-        Err(VErr::DivideByZero)
+        err_ctx.err(span.clone(), ErrorCondition::DivisionByZero);
+        None
       },
-      (Div, Val::Int(a), Val::Int(b))   => Ok(Val::Int(a / b)),
-      (Mod, Val::Int(a), Val::Int(b))   => Ok(Val::Int(a % b)),
-      (Lt, Val::Int(a), Val::Int(b))    => Ok(Val::Bool(a < b)),
-      (Gt, Val::Int(a), Val::Int(b))    => Ok(Val::Bool(a > b)),
-      (Le, Val::Int(a), Val::Int(b))    => Ok(Val::Bool(a <= b)),
-      (Ge, Val::Int(a), Val::Int(b))    => Ok(Val::Bool(a >= b)),
+      (Div, Val::Int(a), Val::Int(b)) => Some(Val::Int(a / b)),
+      (Mod, Val::Int(a), Val::Int(b)) => Some(Val::Int(a % b)),
+      (Lt, Val::Int(a), Val::Int(b)) => Some(Val::Bool(a < b)),
+      (Gt, Val::Int(a), Val::Int(b)) => Some(Val::Bool(a > b)),
+      (Le, Val::Int(a), Val::Int(b)) => Some(Val::Bool(a <= b)),
+      (Ge, Val::Int(a), Val::Int(b)) => Some(Val::Bool(a >= b)),
 
       // Str
-      (Add, Val::Str(a), Val::Str(b))   => Ok(Val::Str(format!("{}{}", a, b))),
-      (Lt, Val::Str(a), Val::Str(b))    => Ok(Val::Bool(a < b)),
-      (Gt, Val::Str(a), Val::Str(b))    => Ok(Val::Bool(a > b)),
-      (Le, Val::Str(a), Val::Str(b))    => Ok(Val::Bool(a <= b)),
-      (Ge, Val::Str(a), Val::Str(b))    => Ok(Val::Bool(a >= b)),
+      (Add, Val::Str(a), Val::Str(b)) => Some(Val::Str(format!("{}{}", a, b))),
+      (Lt, Val::Str(a), Val::Str(b)) => Some(Val::Bool(a < b)),
+      (Gt, Val::Str(a), Val::Str(b)) => Some(Val::Bool(a > b)),
+      (Le, Val::Str(a), Val::Str(b)) => Some(Val::Bool(a <= b)),
+      (Ge, Val::Str(a), Val::Str(b)) => Some(Val::Bool(a >= b)),
 
       // Generic object comparison
-      (Eq, v1, v2)                      => Ok(Val::Bool(v1 == v2)),
-      (Ne, v1, v2)                      => Ok(Val::Bool(v1 != v2)),
+      (Eq, v1, v2) => Some(Val::Bool(v1 == v2)),
+      (Ne, v1, v2) => Some(Val::Bool(v1 != v2)),
 
-                                      _ => Err(VErr::WrongType)
+      _ => {
+        err_ctx.err(span.clone(), ErrorCondition::TypeError);
+        None
+      }
     }
   }
 
